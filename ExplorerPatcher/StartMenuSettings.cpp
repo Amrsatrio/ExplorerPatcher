@@ -1234,14 +1234,14 @@ HRESULT PatchUnifiedTilePinUnpinProvider(HMODULE hModule)
     }
     else
     {
-        // E4 8A 40 A9 E3 03 16 AA E1 03 19 AA E0 03 1A AA ?? ?? ?? ?? ?? ?? ?? F9 E3 03 00 2A // BR
+        // E4 8A 40 A9 E3 03 ?? AA E1 03 ?? AA E0 03 ?? AA ?? ?? ?? ?? ?? ?? ?? F9 E3 03 00 2A // BR
         //                                                 ^^^^^^^^^^^
         // Ref: WindowsInternal::Shell::UnifiedTile::Private::UnifiedTilePinUnpinVerbProvider::GetVerbs()
         match = (PBYTE)FindPattern(
             hModule,
             mi.SizeOfImage,
-            "\xE4\x8A\x40\xA9\xE3\x03\x16\xAA\xE1\x03\x19\xAA\xE0\x03\x1A\xAA\x00\x00\x00\x00\x00\x00\x00\xF9\xE3\x03\x00\x2A",
-            "xxxxxxxxxxxxxxxx???????xxxxx"
+            "\xE4\x8A\x40\xA9\xE3\x03\x00\xAA\xE1\x03\x00\xAA\xE0\x03\x00\xAA\x00\x00\x00\x00\x00\x00\x00\xF9\xE3\x03\x00\x2A",
+            "xxxxxx?xxx?xxx?x???????xxxxx"
         );
         if (match)
         {
