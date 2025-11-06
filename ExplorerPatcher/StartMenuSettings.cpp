@@ -1218,19 +1218,36 @@ HRESULT PatchUnifiedTilePinUnpinProvider(HMODULE hModule)
         }
     }
 #elif defined(_M_ARM64)
-    // E4 06 40 F9 E3 03 15 AA E2 0E 40 F9 E1 03 19 AA E0 03 16 AA ?? ?? ?? ?? E3 03 00 2A
-    //                                                             ^^^^^^^^^^^
+    // 40 F9 E3 03 15 AA ?? ?? 40 F9 E1 03 ?? AA E0 03 ?? AA ?? ?? ?? ?? E3 03 00 2A // NI, GE
+    //                                                       ^^^^^^^^^^^
     // Ref: WindowsInternal::Shell::UnifiedTile::Private::UnifiedTilePinUnpinVerbProvider::GetVerbs()
     PBYTE match = (PBYTE)FindPattern(
         hModule,
         mi.SizeOfImage,
-        "\xE4\x06\x40\xF9\xE3\x03\x15\xAA\xE2\x0E\x40\xF9\xE1\x03\x19\xAA\xE0\x03\x16\xAA\x00\x00\x00\x00\xE3\x03\x00\x2A",
-        "xxxxxxxxxxxxxxxxxxxx????xxxx"
+        "\x40\xF9\xE3\x03\x15\xAA\x00\x00\x40\xF9\xE1\x03\x00\xAA\xE0\x03\x00\xAA\x00\x00\x00\x00\xE3\x03\x00\x2A",
+        "xxxxxx??xxxx?xxx?x????xxxx"
     );
     if (match)
     {
-        match += 20;
+        match += 18;
         match = (PBYTE)ARM64_FollowBL((DWORD*)match);
+    }
+    else
+    {
+        // E4 8A 40 A9 E3 03 16 AA E1 03 19 AA E0 03 1A AA ?? ?? ?? ?? ?? ?? ?? F9 E3 03 00 2A // BR
+        //                                                 ^^^^^^^^^^^
+        // Ref: WindowsInternal::Shell::UnifiedTile::Private::UnifiedTilePinUnpinVerbProvider::GetVerbs()
+        match = (PBYTE)FindPattern(
+            hModule,
+            mi.SizeOfImage,
+            "\xE4\x8A\x40\xA9\xE3\x03\x16\xAA\xE1\x03\x19\xAA\xE0\x03\x1A\xAA\x00\x00\x00\x00\x00\x00\x00\xF9\xE3\x03\x00\x2A",
+            "xxxxxxxxxxxxxxxx???????xxxxx"
+        );
+        if (match)
+        {
+            match += 16;
+            match = (PBYTE)ARM64_FollowBL((DWORD*)match);
+        }
     }
 #endif
 

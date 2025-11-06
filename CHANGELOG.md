@@ -43,7 +43,7 @@ Tested on OS builds 26100.4946, 26100.5074, 26200.5751, and 26220.6682.
 ##### 6
 
 * File Explorer: XAML folder views are now disabled when Windows 11 Command Bar is not used. (80414f5)
-  * This fixes crashes when navigating away and returning to Home/Gallery on 22H2/23H2 (#3447), and when opening Home on 26xxx.7019+.
+  * This fixes crashes when navigating away and returning to Home/Gallery on 22H2/23H2 (#3447), and when opening Home on 26xxx.7015+.
 * File Explorer: Fixed Alt+D not working on builds with modern (XAML) navigation bar in File Explorer. (#2847) (a80d9dc)
 * File Explorer: Mitigated breakages on builds with tabs in File Explorer: (75178ec, df7d604)
   * Fixed menu bar behavior when Windows 7 Command Bar is used. Pressing Alt will now summon the menu bar immediately like it used to. (#2676)
