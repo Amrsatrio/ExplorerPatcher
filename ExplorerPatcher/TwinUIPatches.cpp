@@ -3237,6 +3237,22 @@ void TryToFindTwinuiPCShellOffsets(DWORD* pOffsets)
                 match += 10;
                 pOffsets[1] = (DWORD)FileOffsetToRVA(pFile, (PBYTE)ARM64_FollowBL((DWORD*)match) - pFile);
             }
+            else
+            {
+                // 43 03 1C 32 E4 03 ?? AA E2 03 ?? AA ?? ?? FF 97 // 27938
+                //                                     ^^^^^^^^^^^
+                // Ref: ImmersiveContextMenuHelper::ApplyOwnerDrawToMenu()
+                match = (PBYTE)FindPattern(
+                    pSearchBegin, cbSearch,
+                    "\x43\x03\x1C\x32\xE4\x03\x00\xAA\xE2\x03\x00\xAA\x00\x00\xFF\x97",
+                    "xxxxxx?xxx?x??xx"
+                );
+                if (match)
+                {
+                    match += 12;
+                    pOffsets[1] = (DWORD)FileOffsetToRVA(pFile, (PBYTE)ARM64_FollowBL((DWORD*)match) - pFile);
+                }
+            }
 #endif
             if (pOffsets[1] && pOffsets[1] != 0xFFFFFFFF)
             {
@@ -3416,11 +3432,11 @@ void TryToFindTwinuiPCShellOffsets(DWORD* pOffsets)
                 }
             }
 #elif defined(_M_ARM64)
-            // F3 53 BE A9  F5 5B 01 A9  FD 7B ?? A9  FD 03 00 91  30 00 80 92  ?? 03 04 AA  B0 ?? 00 F9  ?? 03 00 AA  ?? 02 00 F9  ?? 2E 40 F9  ?? 03 03 AA  ?? 23 02 A9  ?? ?? 00 B5
+            // F3 53 BE A9  F5 5B 01 A9  FD 7B ?? A9  FD 03 00 91  30 00 80 92  ?? 03 04 AA  B0 ?? 00 F9  ?? 03 00 AA  ?? 02 00 F9  ?? 2E 40 F9  ?? 03 03 AA  ?? 23 02 A9  ?? ?? ?? B5
             PBYTE match = (PBYTE)FindPattern(
                 pSearchBegin, cbSearch,
                 "\xF3\x53\xBE\xA9\xF5\x5B\x01\xA9\xFD\x7B\x00\xA9\xFD\x03\x00\x91\x30\x00\x80\x92\x00\x03\x04\xAA\xB0\x00\x00\xF9\x00\x03\x00\xAA\x00\x02\x00\xF9\x00\x2E\x40\xF9\x00\x03\x03\xAA\x00\x23\x02\xA9\x00\x00\x00\xB5",
-                "xxxxxxxxxx?xxxxxxxxx?xxxx?xx?xxx?xxx?xxx?xxx?xxx??xx"
+                "xxxxxxxxxx?xxxxxxxxx?xxxx?xx?xxx?xxx?xxx?xxx?xxx???x"
             );
             if (match)
             {
