@@ -605,6 +605,52 @@ inline BOOL IncrementDLLReferenceCount(HINSTANCE hinst)
     return TRUE;
 }
 
+UINT_PTR RVAToFileOffset(PBYTE pBase, UINT_PTR rva);
+
+inline BOOL SectionBeginAndSizeEx64(
+    const IMAGE_DOS_HEADER* dosHeader, const IMAGE_NT_HEADERS64* ntHeader, const char* pszSectionName,
+    PBYTE* beginSection, DWORD* sizeSection)
+{
+    *beginSection = NULL;
+    *sizeSection = 0;
+
+    PIMAGE_SECTION_HEADER firstSection = IMAGE_FIRST_SECTION(ntHeader);
+    for (unsigned int i = 0; i < ntHeader->FileHeader.NumberOfSections; ++i)
+    {
+        PIMAGE_SECTION_HEADER section = firstSection + i;
+        if (strncmp((const char*)section->Name, pszSectionName, IMAGE_SIZEOF_SHORT_NAME) == 0)
+        {
+            *beginSection = (PBYTE)dosHeader + section->VirtualAddress;
+            *sizeSection = section->Misc.VirtualSize;
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+inline BOOL SectionBeginAndSizePEFileEx64(
+    const IMAGE_DOS_HEADER* dosHeader, const IMAGE_NT_HEADERS64* ntHeader, const char* pszSectionName,
+    PBYTE* beginSection, DWORD* sizeSection)
+{
+    *beginSection = NULL;
+    *sizeSection = 0;
+
+    PIMAGE_SECTION_HEADER firstSection = IMAGE_FIRST_SECTION(ntHeader);
+    for (unsigned int i = 0; i < ntHeader->FileHeader.NumberOfSections; ++i)
+    {
+        PIMAGE_SECTION_HEADER section = firstSection + i;
+        if (strncmp((const char*)section->Name, pszSectionName, IMAGE_SIZEOF_SHORT_NAME) == 0)
+        {
+            *beginSection = (PBYTE)dosHeader + section->PointerToRawData;
+            *sizeSection = section->SizeOfRawData;
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
 inline BOOL SectionBeginAndSize(HMODULE hModule, const char* pszSectionName, PBYTE* beginSection, DWORD* sizeSection)
 {
     *beginSection = NULL;
@@ -614,19 +660,28 @@ inline BOOL SectionBeginAndSize(HMODULE hModule, const char* pszSectionName, PBY
     if (dosHeader->e_magic == IMAGE_DOS_SIGNATURE)
     {
         PIMAGE_NT_HEADERS64 ntHeader = (PIMAGE_NT_HEADERS64)((BYTE*)dosHeader + dosHeader->e_lfanew);
-        if (ntHeader->Signature == IMAGE_NT_SIGNATURE)
+        if (ntHeader->Signature == IMAGE_NT_SIGNATURE && ntHeader->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
         {
-            PIMAGE_SECTION_HEADER firstSection = IMAGE_FIRST_SECTION(ntHeader);
-            for (unsigned int i = 0; i < ntHeader->FileHeader.NumberOfSections; ++i)
-            {
-                PIMAGE_SECTION_HEADER section = firstSection + i;
-                if (strncmp((const char*)section->Name, pszSectionName, IMAGE_SIZEOF_SHORT_NAME) == 0)
-                {
-                    *beginSection = (PBYTE)dosHeader + section->VirtualAddress;
-                    *sizeSection = section->SizeOfRawData;
-                    return TRUE;
-                }
-            }
+            return SectionBeginAndSizeEx64(dosHeader, ntHeader, pszSectionName, beginSection, sizeSection);
+        }
+    }
+
+    return FALSE;
+}
+
+inline BOOL SectionBeginAndSizePEFile(
+    PBYTE pFileBase, DWORD fileSize, const char* pszSectionName, PBYTE* beginSection, DWORD* sizeSection)
+{
+    *beginSection = NULL;
+    *sizeSection = 0;
+
+    PIMAGE_DOS_HEADER dosHeader = (PIMAGE_DOS_HEADER)pFileBase;
+    if (dosHeader->e_magic == IMAGE_DOS_SIGNATURE)
+    {
+        PIMAGE_NT_HEADERS64 ntHeader = (PIMAGE_NT_HEADERS64)(pFileBase + dosHeader->e_lfanew);
+        if (ntHeader->Signature == IMAGE_NT_SIGNATURE && ntHeader->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+        {
+            return SectionBeginAndSizePEFileEx64(dosHeader, ntHeader, pszSectionName, beginSection, sizeSection);
         }
     }
 
@@ -716,6 +771,69 @@ inline BOOL GetChpeRanges64(
     return TRUE;
 }
 
+inline BOOL GetChpeRangesPEFile64(
+    DWORD fileSize,
+    const IMAGE_DOS_HEADER* dosHeader, const IMAGE_NT_HEADERS64* ntHeader,
+    const EP_IMAGE_CHPE_RANGE_ENTRY** prgRanges, ULONG* pcRanges)
+{
+    *prgRanges = NULL;
+    *pcRanges = 0;
+    const IMAGE_OPTIONAL_HEADER64* opt = &ntHeader->OptionalHeader;
+
+    if (opt->NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG
+        || !opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG].VirtualAddress)
+    {
+        return FALSE;
+    }
+
+    DWORD directorySize = opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG].Size;
+
+    UINT_PTR directoryOffset = RVAToFileOffset((PBYTE)dosHeader, opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG].VirtualAddress);
+    if (!directoryOffset || directoryOffset + sizeof(IMAGE_LOAD_CONFIG_DIRECTORY64) > fileSize)
+    {
+        return FALSE;
+    }
+
+    const IMAGE_LOAD_CONFIG_DIRECTORY64* cfg = (const IMAGE_LOAD_CONFIG_DIRECTORY64*)(
+        (const char*)dosHeader + directoryOffset);
+
+    const DWORD kMinSize = offsetof(IMAGE_LOAD_CONFIG_DIRECTORY64, CHPEMetadataPointer)
+        + sizeof(ULONGLONG);
+
+    if (directorySize < kMinSize || cfg->Size < kMinSize)
+    {
+        return FALSE;
+    }
+
+    if (!cfg->CHPEMetadataPointer)
+    {
+        return FALSE;
+    }
+
+    UINT_PTR metadataOffset = RVAToFileOffset((PBYTE)dosHeader, cfg->CHPEMetadataPointer - opt->ImageBase);
+    if (!metadataOffset || metadataOffset + sizeof(EP_IMAGE_ARM64EC_METADATA) > fileSize)
+    {
+        return FALSE;
+    }
+
+    // Either IMAGE_CHPE_METADATA_X86 or EP_IMAGE_ARM64EC_METADATA.
+    const EP_IMAGE_ARM64EC_METADATA* metadata = (const EP_IMAGE_ARM64EC_METADATA*)(
+        (const char*)dosHeader + metadataOffset);
+
+    UINT_PTR codeMapOffset = RVAToFileOffset((PBYTE)dosHeader, metadata->CodeMap);
+    if (!codeMapOffset || codeMapOffset + sizeof(EP_IMAGE_CHPE_RANGE_ENTRY) * metadata->CodeMapCount > fileSize)
+    {
+        return FALSE;
+    }
+
+    const EP_IMAGE_CHPE_RANGE_ENTRY* codeMap = (const EP_IMAGE_CHPE_RANGE_ENTRY*)(
+        (const char*)dosHeader + codeMapOffset);
+
+    *prgRanges = codeMap;
+    *pcRanges = metadata->CodeMapCount;
+    return TRUE;
+}
+
 typedef enum _EP_ChpeCodeRangeType
 {
     CODERANGE_Arm64,
@@ -723,17 +841,11 @@ typedef enum _EP_ChpeCodeRangeType
     CODERANGE_Amd64,
 } EP_ChpeCodeRangeType;
 
-UINT_PTR RVAToFileOffset(PBYTE pBase, UINT_PTR rva);
-
+#if defined(_M_ARM64) || defined(_M_ARM64EC)
 inline BOOL TextSectionBeginAndSize(HMODULE hModule, PBYTE* beginSection, DWORD* sizeSection)
 {
-    if (!SectionBeginAndSize(hModule, ".text", beginSection, sizeSection))
-        return FALSE;
-
-    // Narrow down the results to the appropriate code range on Arm64X binaries
-#if defined(_M_ARM64) || defined(_M_ARM64EC)
-    if (!beginSection || !sizeSection)
-        return FALSE;
+    *beginSection = NULL;
+    *sizeSection = 0;
 
 #if defined(_M_ARM64)
     const EP_ChpeCodeRangeType appropriateCodeRangeType = CODERANGE_Arm64;
@@ -747,6 +859,10 @@ inline BOOL TextSectionBeginAndSize(HMODULE hModule, PBYTE* beginSection, DWORD*
         PIMAGE_NT_HEADERS64 ntHeader = (PIMAGE_NT_HEADERS64)((BYTE*)dosHeader + dosHeader->e_lfanew);
         if (ntHeader->Signature == IMAGE_NT_SIGNATURE && ntHeader->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
         {
+            if (!SectionBeginAndSizeEx64(dosHeader, ntHeader, ".text", beginSection, sizeSection))
+                return FALSE;
+
+            // Narrow down the results to the appropriate code range on Arm64X binaries
             const EP_IMAGE_CHPE_RANGE_ENTRY* rgRanges;
             ULONG cRanges;
             if (GetChpeRanges64(dosHeader, ntHeader, &rgRanges, &cRanges))
@@ -759,22 +875,90 @@ inline BOOL TextSectionBeginAndSize(HMODULE hModule, PBYTE* beginSection, DWORD*
                     EP_ChpeCodeRangeType type = (EP_ChpeCodeRangeType)(pCurrent->StartOffset & typeMask);
                     if (type == appropriateCodeRangeType)
                     {
-                        *beginSection = (PBYTE)hModule + RVAToFileOffset((PBYTE)hModule, start);
+                        *beginSection = (PBYTE)hModule + start;
                         *sizeSection = pCurrent->Length;
                         break;
                     }
                 }
             }
+
+            return TRUE;
         }
     }
 
-    return TRUE;
-#endif
+    return FALSE;
 }
+
+inline BOOL TextSectionBeginAndSizePEFile(PBYTE pFileBase, DWORD fileSize, PBYTE* beginSection, DWORD* sizeSection)
+{
+    *beginSection = NULL;
+    *sizeSection = 0;
+
+#if defined(_M_ARM64)
+    const EP_ChpeCodeRangeType appropriateCodeRangeType = CODERANGE_Arm64;
+#elif defined(_M_ARM64EC)
+    const EP_ChpeCodeRangeType appropriateCodeRangeType = CODERANGE_Arm64EC;
+#endif
+
+    PIMAGE_DOS_HEADER dosHeader = (PIMAGE_DOS_HEADER)pFileBase;
+    if (dosHeader->e_magic == IMAGE_DOS_SIGNATURE)
+    {
+        PIMAGE_NT_HEADERS64 ntHeader = (PIMAGE_NT_HEADERS64)(pFileBase + dosHeader->e_lfanew);
+        if (ntHeader->Signature == IMAGE_NT_SIGNATURE && ntHeader->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+        {
+            if (!SectionBeginAndSizePEFileEx64(dosHeader, ntHeader, ".text", beginSection, sizeSection))
+                return FALSE;
+
+            // Narrow down the results to the appropriate code range on Arm64X binaries
+            const EP_IMAGE_CHPE_RANGE_ENTRY* rgRanges;
+            ULONG cRanges;
+            if (GetChpeRangesPEFile64(fileSize, dosHeader, ntHeader, &rgRanges, &cRanges))
+            {
+                const EP_IMAGE_CHPE_RANGE_ENTRY* pLast = rgRanges + cRanges;
+                for (const EP_IMAGE_CHPE_RANGE_ENTRY* pCurrent = rgRanges; pCurrent < pLast; ++pCurrent)
+                {
+                    const ULONG typeMask = 3; // 1 for 32 bit
+                    ULONG start = pCurrent->StartOffset & ~typeMask; // RVA
+                    EP_ChpeCodeRangeType type = (EP_ChpeCodeRangeType)(pCurrent->StartOffset & typeMask);
+                    if (type == appropriateCodeRangeType)
+                    {
+                        UINT_PTR offset = RVAToFileOffset(pFileBase, start);
+                        if (offset && offset + pCurrent->Length <= fileSize)
+                        {
+                            *beginSection = (PBYTE)pFileBase + offset;
+                            *sizeSection = pCurrent->Length;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+#else
+__forceinline BOOL TextSectionBeginAndSize(HMODULE hModule, PBYTE* beginSection, DWORD* sizeSection)
+{
+    return SectionBeginAndSize(hModule, ".text", beginSection, sizeSection);
+}
+
+__forceinline BOOL TextSectionBeginAndSizePEFile(PBYTE pFileBase, DWORD fileSize, PBYTE* beginSection, DWORD* sizeSection)
+{
+    return SectionBeginAndSizePEFile(pFileBase, fileSize, ".text", beginSection, sizeSection);
+}
+#endif
 
 __forceinline BOOL RDataSectionBeginAndSize(HMODULE hModule, PBYTE* beginSection, DWORD* sizeSection)
 {
     return SectionBeginAndSize(hModule, ".rdata", beginSection, sizeSection);
+}
+
+__forceinline BOOL RDataSectionBeginAndSizePEFile(PBYTE pFileBase, DWORD fileSize, PBYTE* beginSection, DWORD* sizeSection)
+{
+    return SectionBeginAndSizePEFile(pFileBase, fileSize, ".rdata", beginSection, sizeSection);
 }
 
 PVOID FindPattern(PVOID pBase, SIZE_T dwSize, LPCSTR lpPattern, LPCSTR lpMask);
@@ -1097,7 +1281,7 @@ inline PVOID FindPattern(PVOID pBase, SIZE_T dwSize, LPCSTR lpPattern, LPCSTR lp
 inline UINT_PTR FileOffsetToRVA(PBYTE pBase, UINT_PTR offset)
 {
     PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pBase;
-    PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)(pBase + pDosHeader->e_lfanew);
+    PIMAGE_NT_HEADERS64 pNtHeaders = (PIMAGE_NT_HEADERS64)(pBase + pDosHeader->e_lfanew);
     PIMAGE_SECTION_HEADER pSection = IMAGE_FIRST_SECTION(pNtHeaders);
     for (int i = 0; i < pNtHeaders->FileHeader.NumberOfSections; i++, pSection++)
     {
@@ -1110,7 +1294,7 @@ inline UINT_PTR FileOffsetToRVA(PBYTE pBase, UINT_PTR offset)
 inline UINT_PTR RVAToFileOffset(PBYTE pBase, UINT_PTR rva)
 {
     PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pBase;
-    PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)(pBase + pDosHeader->e_lfanew);
+    PIMAGE_NT_HEADERS64 pNtHeaders = (PIMAGE_NT_HEADERS64)(pBase + pDosHeader->e_lfanew);
     PIMAGE_SECTION_HEADER pSection = IMAGE_FIRST_SECTION(pNtHeaders);
     for (int i = 0; i < pNtHeaders->FileHeader.NumberOfSections; i++, pSection++)
     {
