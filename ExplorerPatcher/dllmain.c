@@ -546,7 +546,7 @@ void LaunchNetworkTargets(DWORD dwTarget)
     }
     else if (dwTarget == 2)
     {
-        HMODULE hVan = LoadLibraryW(L"van.dll");
+        HMODULE hVan = LoadLibraryExW(L"van.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
         if (hVan)
         {
             long(*ShowVAN)(BOOL, BOOL, void*) = GetProcAddress(hVan, "ShowVAN");
@@ -3024,7 +3024,7 @@ BOOL sndvolsso_TrackPopupMenuExHook(
 }
 void PatchSndvolsso()
 {
-    HANDLE hSndvolsso = LoadLibraryW(L"sndvolsso.dll");
+    HANDLE hSndvolsso = LoadLibraryExW(L"sndvolsso.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     VnPatchIAT(hSndvolsso, "user32.dll", "TrackPopupMenuEx", sndvolsso_TrackPopupMenuExHook);
 
     // Create a local funchook because we can get called after the global one is installed
@@ -3545,7 +3545,7 @@ HWND WINAPI explorerframe_SHCreateWorkerWindowHook(
             // If we don't do this, it will only fix itself once the user changes the system color scheme or toggling transparency effects
             if (!ShouldAppsUseDarkMode)
             {
-                HANDLE hUxtheme = LoadLibraryW(L"uxtheme.dll");
+                HANDLE hUxtheme = LoadLibraryExW(L"uxtheme.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
                 ShouldAppsUseDarkMode = GetProcAddress(hUxtheme, (LPCSTR)0x84);
             }
             if (ShouldAppsUseDarkMode)
@@ -9497,7 +9497,7 @@ DWORD InjectBasicFunctions(BOOL bIsExplorer, BOOL bInstall)
 {
     //Sleep(150);
 
-    HMODULE hShlwapi = LoadLibraryW(L"Shlwapi.dll");
+    HMODULE hShlwapi = LoadLibraryExW(L"Shlwapi.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (hShlwapi)
     {
         if (bInstall)
@@ -9511,7 +9511,7 @@ DWORD InjectBasicFunctions(BOOL bIsExplorer, BOOL bInstall)
         }
     }
 
-    HANDLE hShell32 = LoadLibraryW(L"shell32.dll");
+    HANDLE hShell32 = LoadLibraryExW(L"shell32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (hShell32)
     {
         if (bInstall)
@@ -9554,7 +9554,7 @@ DWORD InjectBasicFunctions(BOOL bIsExplorer, BOOL bInstall)
         }
     }
 
-    HANDLE hShcore = LoadLibraryW(L"shcore.dll");
+    HANDLE hShcore = LoadLibraryExW(L"shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (hShcore)
     {
         if (bInstall)
@@ -9568,7 +9568,7 @@ DWORD InjectBasicFunctions(BOOL bIsExplorer, BOOL bInstall)
         }
     }
 
-    HANDLE hExplorerFrame = LoadLibraryW(L"ExplorerFrame.dll");
+    HANDLE hExplorerFrame = LoadLibraryExW(L"ExplorerFrame.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (hExplorerFrame)
     {
         if (bInstall)
@@ -9690,7 +9690,7 @@ DWORD InjectBasicFunctions(BOOL bIsExplorer, BOOL bInstall)
 
         if (!bIsExplorer && IsXamlSoundsEnabled())
         {
-            HANDLE hCombase = LoadLibraryW(L"combase.dll");
+            HANDLE hCombase = LoadLibraryExW(L"combase.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
             VnPatchIAT(hCombase, "api-ms-win-core-libraryloader-l1-2-0.dll", "LoadLibraryExW", combase_LoadLibraryExW);
         }
     }
@@ -9970,7 +9970,7 @@ extern HRESULT PatchStartTileDataFurther(HMODULE hModule, BOOL bSMEH);
 
 static void PatchStartTileData(BOOL bSMEH)
 {
-    HANDLE hStartTileData = LoadLibraryW(L"StartTileData.dll");
+    HANDLE hStartTileData = LoadLibraryExW(L"StartTileData.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
 
     VnPatchIAT(hStartTileData, "api-ms-win-core-winrt-l1-1-0.dll", "RoGetActivationFactory", AppResolver_StartTileData_RoGetActivationFactory);
 
@@ -10888,7 +10888,7 @@ DWORD Inject(BOOL bIsExplorer)
     }
 
 
-    HANDLE hUser32 = LoadLibraryW(L"user32.dll");
+    HANDLE hUser32 = LoadLibraryExW(L"user32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     CreateWindowInBand = GetProcAddress(hUser32, "CreateWindowInBand");
     GetWindowBand = GetProcAddress(hUser32, "GetWindowBand");
     SetWindowBand = GetProcAddress(hUser32, "SetWindowBand");
@@ -11058,7 +11058,7 @@ DWORD Inject(BOOL bIsExplorer)
         UpdateSearchBox();
     }
 
-    HANDLE hShcore = LoadLibraryW(L"shcore.dll");
+    HANDLE hShcore = LoadLibraryExW(L"shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     SHWindowsPolicy = GetProcAddress(hShcore, (LPCSTR)190);
 #ifdef USE_PRIVATE_INTERFACES
     explorer_SHCreateStreamOnModuleResourceWFunc = GetProcAddress(hShcore, (LPCSTR)109);
@@ -11096,7 +11096,7 @@ DWORD Inject(BOOL bIsExplorer)
 
 
 
-    HANDLE hUxtheme = LoadLibraryW(L"uxtheme.dll");
+    HANDLE hUxtheme = LoadLibraryExW(L"uxtheme.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     GetThemeName = (GetThemeName_t)GetProcAddress(hUxtheme, MAKEINTRESOURCEA(74));
     RefreshImmersiveColorPolicyState = (RefreshImmersiveColorPolicyState_t)GetProcAddress(hUxtheme, MAKEINTRESOURCEA(104));
     GetIsImmersiveColorUsingHighContrast = (GetIsImmersiveColorUsingHighContrast_t)GetProcAddress(hUxtheme, MAKEINTRESOURCEA(106));
@@ -11131,7 +11131,7 @@ DWORD Inject(BOOL bIsExplorer)
         Win10TaskbarHooks_PatchEPTaskbarVtables(hMyTaskbar);
     }
 
-    HANDLE hCombase = LoadLibraryW(L"combase.dll");
+    HANDLE hCombase = LoadLibraryExW(L"combase.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (IsWindows11())
     {
         if (IsWindows11Version22H2OrHigher())
@@ -11147,7 +11147,7 @@ DWORD Inject(BOOL bIsExplorer)
     printf("Setup combase functions done\n");
 
 
-    HANDLE hTwinui = LoadLibraryW(L"twinui.dll");
+    HANDLE hTwinui = LoadLibraryExW(L"twinui.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!IsWindows11())
     {
         VnPatchIAT(hTwinui, "user32.dll", "TrackPopupMenu", twinui_TrackPopupMenuHook);
@@ -11159,7 +11159,7 @@ DWORD Inject(BOOL bIsExplorer)
     printf("Setup twinui functions done\n");
 
 
-    HANDLE hStobject = LoadLibraryW(L"stobject.dll");
+    HANDLE hStobject = LoadLibraryExW(L"stobject.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (hStobject)
     {
         VnPatchIAT(hStobject, "api-ms-win-core-registry-l1-1-0.dll", "RegGetValueW", stobject_RegGetValueW);
@@ -11203,7 +11203,7 @@ DWORD Inject(BOOL bIsExplorer)
 
     if (global_rovi.dwBuildNumber < 25236)
     {
-        HANDLE hPnidui = LoadLibraryW(L"pnidui.dll");
+        HANDLE hPnidui = LoadLibraryExW(L"pnidui.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
         if (hPnidui)
         {
             PatchPnidui(hPnidui);
@@ -11309,7 +11309,7 @@ DWORD Inject(BOOL bIsExplorer)
 
     if (IsWindows11())
     {
-        HANDLE hInputSwitch = LoadLibraryW(L"InputSwitch.dll");
+        HANDLE hInputSwitch = LoadLibraryExW(L"InputSwitch.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
         if (bOldTaskbar)
         {
             printf("[IME] Context menu patch status: %d\n", PatchContextMenuOfNewMicrosoftIME(NULL));
@@ -11324,7 +11324,7 @@ DWORD Inject(BOOL bIsExplorer)
         HANDLE hWindowsudkShellcommon = LoadLibraryW(L"windowsudk.shellcommon.dll");
         if (hWindowsudkShellcommon)
         {
-            HANDLE hSLC = LoadLibraryW(L"slc.dll");
+            HANDLE hSLC = LoadLibraryExW(L"slc.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
             if (hSLC)
             {
                 SLGetWindowsInformationDWORDFunc = GetProcAddress(hSLC, "SLGetWindowsInformationDWORD");
@@ -11339,7 +11339,7 @@ DWORD Inject(BOOL bIsExplorer)
 
 
 
-    HANDLE hPeopleBand = LoadLibraryW(L"PeopleBand.dll");
+    HANDLE hPeopleBand = LoadLibraryExW(L"PeopleBand.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (hPeopleBand)
     {
         if (IsOS(OS_ANYSERVER)) VnPatchIAT(hPeopleBand, "SHLWAPI.dll", (LPCSTR)437, PeopleBand_IsOS);
@@ -11879,7 +11879,7 @@ INT64(*StartDocked_StartSizingFrame_StartSizingFrameFunc)(void* _this) = NULL;
 INT64 StartDocked_StartSizingFrame_StartSizingFrameHook(void* _this)
 {
     INT64 rv = StartDocked_StartSizingFrame_StartSizingFrameFunc(_this);
-    HMODULE hModule = LoadLibraryW(L"Shlwapi.dll");
+    HMODULE hModule = LoadLibraryExW(L"Shlwapi.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (hModule)
     {
         DWORD dwStatus = 0, dwSize = sizeof(DWORD);
@@ -12807,7 +12807,7 @@ DWORD InjectStartMenu()
     int rv;
     DWORD dwVal0 = 0, dwVal1 = 0, dwVal2 = 0, dwVal3 = 0, dwVal4 = 0;
 
-    HMODULE hModule = LoadLibraryW(L"Shlwapi.dll");
+    HMODULE hModule = LoadLibraryExW(L"Shlwapi.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (hModule)
     {
         DWORD dwStatus = 0, dwSize = sizeof(DWORD);
