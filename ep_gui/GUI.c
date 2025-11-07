@@ -4132,7 +4132,7 @@ __declspec(dllexport) int ZZGUI(HWND hWnd, HINSTANCE hInstance, LPSTR lpszCmdLin
     HANDLE hUxtheme = NULL;
     BOOL bHasLoadedUxtheme = FALSE;
     bHasLoadedUxtheme = TRUE;
-    hUxtheme = LoadLibraryW(L"uxtheme.dll");
+    hUxtheme = LoadLibraryExW(L"uxtheme.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (hUxtheme)
     {
         RefreshImmersiveColorPolicyState = GetProcAddress(hUxtheme, (LPCSTR)104);
