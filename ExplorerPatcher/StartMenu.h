@@ -6,8 +6,6 @@
 #include <Shlwapi.h>
 #pragma comment(lib, "Shlwapi.lib")
 #include <TlHelp32.h>
-#include <Psapi.h>
-#pragma comment(lib, "Psapi.lib")
 #include <roapi.h>
 #include <winstring.h>
 #include "utility.h"

@@ -7,7 +7,6 @@
 #include <winrt/windows.foundation.collections.h>
 #include <winrt/windows.system.h>
 #include <wil/winrt.h>
-#pragma comment(lib, "Psapi.lib")
 
 using namespace Microsoft::WRL;
 
@@ -1174,19 +1173,20 @@ HRESULT WindowsInternal__Shell__UnifiedTile__Private__UnifiedTilePinUnpinVerbPro
 
 HRESULT PatchUnifiedTilePinUnpinProvider(HMODULE hModule)
 {
-    MODULEINFO mi;
-    RETURN_IF_WIN32_BOOL_FALSE(GetModuleInformation(GetCurrentProcess(), hModule, &mi, sizeof(mi)));
+    PBYTE pText;
+    DWORD cbText;
+    RETURN_HR_IF(E_NOT_SET, !TextSectionBeginAndSize(hModule, &pText, &cbText));
 
 #if defined(_M_X64)
     PBYTE match;
-    SIZE_T offset = (SIZE_T)hModule;
+    SIZE_T offset = (SIZE_T)pText;
     while (true)
     {
         // 48 89 ?? 24 ?? 4C 8B ?? 4C 8B 44 24 ?? 49 8B ?? ?? 8B ?? E8 ?? ?? ?? ??
         //                                                             ^^^^^^^^^^^
         match = (PBYTE)FindPattern(
             (PVOID)offset,
-            mi.SizeOfImage - (DWORD)(offset - (SIZE_T)hModule),
+            cbText - (DWORD)(offset - (SIZE_T)pText),
             "\x48\x89\x00\x24\x00\x4C\x8B\x00\x4C\x8B\x44\x24\x00\x49\x8B\x00\x00\x8B\x00\xE8",
             "xx?x?xx?xxxx?xx??x?x"
         );
@@ -1222,8 +1222,8 @@ HRESULT PatchUnifiedTilePinUnpinProvider(HMODULE hModule)
     //                                                       ^^^^^^^^^^^
     // Ref: WindowsInternal::Shell::UnifiedTile::Private::UnifiedTilePinUnpinVerbProvider::GetVerbs()
     PBYTE match = (PBYTE)FindPattern(
-        hModule,
-        mi.SizeOfImage,
+        pText,
+        cbText,
         "\x40\xF9\xE3\x03\x15\xAA\x00\x00\x40\xF9\xE1\x03\x00\xAA\xE0\x03\x00\xAA\x00\x00\x00\x00\xE3\x03\x00\x2A",
         "xxxxxx??xxxx?xxx?x????xxxx"
     );
@@ -1238,8 +1238,8 @@ HRESULT PatchUnifiedTilePinUnpinProvider(HMODULE hModule)
         //                                                 ^^^^^^^^^^^
         // Ref: WindowsInternal::Shell::UnifiedTile::Private::UnifiedTilePinUnpinVerbProvider::GetVerbs()
         match = (PBYTE)FindPattern(
-            hModule,
-            mi.SizeOfImage,
+            pText,
+            cbText,
             "\xE4\x8A\x40\xA9\xE3\x03\x00\xAA\xE1\x03\x00\xAA\xE0\x03\x00\xAA\x00\x00\x00\x00\x00\x00\x00\xF9\xE3\x03\x00\x2A",
             "xxxxxx?xxx?xxx?x???????xxxxx"
         );

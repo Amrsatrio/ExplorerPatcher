@@ -75,10 +75,9 @@ void PatchXamlMetaDataProviderGuid()
     }
     bPatched = TRUE;
 
-    PBYTE beginRData = NULL;
-    DWORD sizeRData = 0;
-    RDataSectionBeginAndSize(GetModuleHandleW(NULL), &beginRData, &sizeRData);
-    if (!beginRData || !sizeRData)
+    PBYTE beginRData;
+    DWORD sizeRData;
+    if (!RDataSectionBeginAndSize(GetModuleHandleW(NULL), &beginRData, &sizeRData))
     {
         return;
     }
@@ -113,10 +112,9 @@ void Init()
             g_bIsUsingOwnJumpViewUI = TRUE;
         }
 
-        PBYTE beginText = NULL;
-        DWORD sizeText = 0;
-        TextSectionBeginAndSize(GetModuleHandleW(NULL), &beginText, &sizeText);
-        if (beginText && sizeText)
+        PBYTE beginText;
+        DWORD sizeText;
+        if (TextSectionBeginAndSize(GetModuleHandleW(NULL), &beginText, &sizeText))
         {
             // Fix 0x800704DA (The service is already registered) exception when feature flag 58205615 is enabled
             // Feature flag introduced in:
