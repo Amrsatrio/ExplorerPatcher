@@ -2489,6 +2489,7 @@ static void HookImmersiveMenuFunctions(
     if (!TextSectionBeginAndSize(module, &pText, &cbText))
         return;
 
+    // Don't forget to sync with TryToFindTwinuiPCShellOffsets in TwinUIPatches.cpp!
 #if defined(_M_X64)
     // 40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? 48 81 EC ? ? ? ? 48 8B 05 ? ? ? ? 48 33 C4 48 89 85 ? ? ? ? 4C 8B ? ? ? ? ? 41 8B C1
     PBYTE match = (PBYTE)FindPattern(
@@ -2509,6 +2510,22 @@ static void HookImmersiveMenuFunctions(
     {
         match += 10;
         match = (PBYTE)ARM64_FollowBL((DWORD*)match);
+    }
+    else
+    {
+        // 43 03 1C 32 E4 03 ?? AA E2 03 ?? AA ?? ?? FF 97 // 27938
+        //                                     ^^^^^^^^^^^
+        // Ref: ImmersiveContextMenuHelper::ApplyOwnerDrawToMenu()
+        match = (PBYTE)FindPattern(
+            pText, cbText,
+            "\x43\x03\x1C\x32\xE4\x03\x00\xAA\xE2\x03\x00\xAA\x00\x00\xFF\x97",
+            "xxxxxx?xxx?x??xx"
+        );
+        if (match)
+        {
+            match += 12;
+            match = (PBYTE)ARM64_FollowBL((DWORD*)match);
+        }
     }
 #endif
     if (match)

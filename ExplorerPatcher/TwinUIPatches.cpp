@@ -3211,6 +3211,7 @@ void TryToFindTwinuiPCShellOffsets(DWORD* pOffsets)
         }
         if (!pOffsets[1] || pOffsets[1] == 0xFFFFFFFF)
         {
+            // Don't forget to sync with HookImmersiveMenuFunctions in dllmain.c!
 #if defined(_M_X64)
             // Don't worry if this is too long, this works on 17763 ~ 27943
             // 40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? 48 81 EC ? ? ? ? 48 8B 05 ? ? ? ? 48 33 C4 48 89 85 ? ? ? ? 4C 8B ? ? ? ? ? 41 8B C1
