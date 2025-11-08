@@ -4,7 +4,7 @@ This document includes the same release notes as in the [Releases](https://githu
 
 ## 26100.4946.69
 
-Tested on OS builds 26100.4946, 26100.5074, 26200.5751, and 26220.6682.
+Tested on OS builds 26100.4946, 26100.5074, 26100.6899, 26200.5751, 26220.6682, and 27982.1.
 
 ##### 1
 
@@ -51,6 +51,10 @@ Tested on OS builds 26100.4946, 26100.5074, 26200.5751, and 26220.6682.
 * Taskbar10: These settings now take effect on ep_taskbar: (#4097) (48e1de3)
   * Pinned items act as quick launch (don't group with active apps)
   * When the taskbar shows button labels, remove the extra gap around pinned items
+
+##### 7
+
+* Updated pattern matching code for slightly better performance and compatibility with 26H1 ARM64. (677fd9f, e641e0a, e77123a, 3c8e79f, 854770b, 04dd52b)
 
 Known issues we will address in the short term:
 * Changing weather icon pack to "Microsoft" has no effect.
