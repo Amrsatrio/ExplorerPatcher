@@ -2106,17 +2106,17 @@ BOOL FixStartMenuAnimation(HMODULE hTwinuiPcshell, PBYTE pSearchBegin, size_t cb
         matchGetMonitorInformation += 5 + *(int*)(matchGetMonitorInformation + 1);
     }
 #elif defined(_M_ARM64)
-    // * Pattern for 226xx, CSingleViewShellExperience* first arg *not* passed (E1 03 14 AA)
+    // * Pattern for 22000 and 226xx, CSingleViewShellExperience* first arg *not* passed (E1 03 14 AA)
     //   ```
-    //   A9 E4 ?? ?? ?? E3 ?? ?? 91 E2 ?? ?? 91 E0 03 13 AA ?? ?? ?? ?? ?? 03 00 2A
+    //   A9 E4 ?? ?? ?? E3 ?? ?? 91 E2 ?? ?? 91 E0 03 ?? AA ?? ?? ?? ?? ?? 03 00 2A
     //                                                      ^^^^^^^^^^^
     //   ```
     // Ref: CStartExperienceManager::PositionMenu()
     PBYTE matchGetMonitorInformation = (PBYTE)FindPattern(
         pSearchBegin,
         cbSearch,
-        "\xA9\xE4\x00\x00\x00\xE3\x00\x00\x91\xE2\x00\x00\x91\xE0\x03\x13\xAA\x00\x00\x00\x00\x00\x03\x00\x2A",
-        "xx???x??xx??xxxxx?????xxx"
+        "\xA9\xE4\x00\x00\x00\xE3\x00\x00\x91\xE2\x00\x00\x91\xE0\x03\x00\xAA\x00\x00\x00\x00\x00\x03\x00\x2A",
+        "xx???x??xx??xxx?x?????xxx"
     );
     if (matchGetMonitorInformation)
     {
