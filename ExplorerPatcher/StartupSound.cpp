@@ -301,7 +301,7 @@ LRESULT CSoundWnd::v_WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         }
         case WM_NCDESTROY:
         {
-            SetWindowLongW(hwnd, 0, 0);
+            SetWindowLongPtrW(hwnd, 0, 0);
             g_hwndSound = nullptr;
             m_hwnd = nullptr;
             PostQuitMessage(0);
