@@ -11392,7 +11392,12 @@ DWORD Inject(BOOL bIsExplorer)
         }
         else
         {
-            CreateThread(0, 0, FixTaskbarAutohide, 0, 0, 0);
+            BOOL bStockTaskbarAutohideOk = global_rovi.dwBuildNumber > 22000
+                || (global_rovi.dwBuildNumber == 22000 && global_ubr >= 318);
+            if (!bStockTaskbarAutohideOk)
+            {
+                CreateThread(0, 0, FixTaskbarAutohide, 0, 0, 0);
+            }
         }
     }
 
