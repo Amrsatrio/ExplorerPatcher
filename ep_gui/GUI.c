@@ -238,73 +238,58 @@ LSTATUS GUI_Internal_RegSetValueExW(
         }
         return RegSetValueExW(hKey, lpValueName, 0, dwType, lpData, cbData);
     }
+
     if (!wcscmp(lpValueName, L"Virtualized_" _T(EP_CLSID) L"_TaskbarPosition"))
     {
-        StuckRectsData srd;
-        DWORD pcbData = sizeof(StuckRectsData);
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StuckRectsLegacy",
-            L"Settings",
-            REG_BINARY,
-            NULL,
-            &srd,
-            &pcbData);
-        if (pcbData == sizeof(StuckRectsData) && srd.pvData[0] == sizeof(StuckRectsData) && srd.pvData[1] == -2)
+        HWND hwndTray = FindWindowW(L"Shell_TrayWnd", NULL);
+        if (hwndTray)
         {
-            srd.pvData[3] = *(DWORD*)lpData;
+            SendMessageW(hwndTray, WM_USER + 0x1CA, 6, *(DWORD*)lpData); // -> TrayUI::_HandleTrayPrivateSettingMessage(6, *(DWORD*)lpData)
             dwTaskbarPosition = *(DWORD*)lpData;
-            RegSetKeyValueW(
+        }
+        else
+        {
+            StuckRectsData srd;
+            DWORD pcbData = sizeof(StuckRectsData);
+            RegGetValueW(
                 HKEY_CURRENT_USER,
                 L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StuckRectsLegacy",
                 L"Settings",
                 REG_BINARY,
+                NULL,
                 &srd,
-                sizeof(StuckRectsData)
-            );
-        }
-        pcbData = sizeof(StuckRectsData);
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StuckRects3",
-            L"Settings",
-            REG_BINARY,
-            NULL,
-            &srd,
-            &pcbData);
-        if (pcbData == sizeof(StuckRectsData) && srd.pvData[0] == sizeof(StuckRectsData) && srd.pvData[1] == -2)
-        {
-            srd.pvData[3] = *(DWORD*)lpData;
-            if (srd.pvData[3] != 1 && srd.pvData[3] != 3) // Disallow left/right settings for Windows 11 taskbar, as this breaks it
+                &pcbData);
+            if (pcbData == sizeof(StuckRectsData) && srd.pvData[0] == sizeof(StuckRectsData) && srd.pvData[1] == -2)
             {
-                srd.pvData[3] = 3;
+                srd.pvData[3] = *(DWORD*)lpData;
+                dwTaskbarPosition = *(DWORD*)lpData;
+                RegSetKeyValueW(
+                    HKEY_CURRENT_USER,
+                    L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StuckRectsLegacy",
+                    L"Settings",
+                    REG_BINARY,
+                    &srd,
+                    sizeof(StuckRectsData)
+                );
             }
-            RegSetKeyValueW(
-                HKEY_CURRENT_USER,
-                L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StuckRects3",
-                L"Settings",
-                REG_BINARY,
-                &srd,
-                sizeof(StuckRectsData)
-            );
         }
         return ERROR_SUCCESS;
     }
     else if (!wcscmp(lpValueName, L"Virtualized_" _T(EP_CLSID) L"_MMTaskbarPosition"))
     {
-        HKEY hKey = NULL;
+        HKEY hKeyStuckRectsLegacy = NULL;
         RegOpenKeyExW(
             HKEY_CURRENT_USER,
             L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MMStuckRectsLegacy",
             REG_OPTION_NON_VOLATILE,
             KEY_READ | KEY_WRITE,
-            &hKey
+            &hKeyStuckRectsLegacy
         );
-        if (hKey)
+        if (hKeyStuckRectsLegacy)
         {
             DWORD cValues = 0;
             RegQueryInfoKeyW(
-                hKey,
+                hKeyStuckRectsLegacy,
                 NULL,
                 NULL,
                 NULL,
@@ -324,7 +309,7 @@ LSTATUS GUI_Internal_RegSetValueExW(
             for (int i = 0; i < cValues; ++i)
             {
                 RegEnumValueW(
-                    hKey,
+                    hKeyStuckRectsLegacy,
                     i,
                     name,
                     &szName,
@@ -345,66 +330,8 @@ LSTATUS GUI_Internal_RegSetValueExW(
                     sizeof(StuckRectsData)
                 );
             }
-            RegCloseKey(hKey);
+            RegCloseKey(hKeyStuckRectsLegacy);
             SendNotifyMessageW(HWND_BROADCAST, WM_WININICHANGE, 0, (LPARAM)L"TraySettings");
-        }
-        RegOpenKeyExW(
-            HKEY_CURRENT_USER,
-            L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MMStuckRects3",
-            REG_OPTION_NON_VOLATILE,
-            KEY_READ | KEY_WRITE,
-            &hKey
-        );
-        if (hKey)
-        {
-            DWORD cValues = 0;
-            RegQueryInfoKeyW(
-                hKey,
-                NULL,
-                NULL,
-                NULL,
-                NULL,
-                NULL,
-                NULL,
-                &cValues,
-                NULL,
-                NULL,
-                NULL,
-                NULL
-            );
-            WCHAR name[60];
-            DWORD szName = 60;
-            StuckRectsData srd;
-            DWORD pcbData = sizeof(StuckRectsData);
-            for (int i = 0; i < cValues; ++i)
-            {
-                RegEnumValueW(
-                    hKey,
-                    i,
-                    name,
-                    &szName,
-                    0,
-                    NULL,
-                    &srd,
-                    &pcbData
-                );
-                szName = 60;
-                srd.pvData[3] = *(DWORD*)lpData;
-                if (srd.pvData[3] != 1 && srd.pvData[3] != 3) // Disallow left/right settings for Windows 11 taskbar, as this breaks it
-                {
-                    srd.pvData[3] = 3;
-                }
-                pcbData = sizeof(StuckRectsData);
-                RegSetKeyValueW(
-                    HKEY_CURRENT_USER,
-                    L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MMStuckRects3",
-                    name,
-                    REG_BINARY,
-                    &srd,
-                    sizeof(StuckRectsData)
-                );
-            }
-            RegCloseKey(hKey);
         }
         return ERROR_SUCCESS;
     }
@@ -625,30 +552,40 @@ LSTATUS GUI_Internal_RegQueryValueExW(
     }
     if (!wcscmp(lpValueName, L"Virtualized_" _T(EP_CLSID) L"_TaskbarPosition"))
     {
-        StuckRectsData srd;
-        DWORD pcbData = sizeof(StuckRectsData);
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StuckRectsLegacy",
-            L"Settings",
-            REG_BINARY,
-            NULL,
-            &srd,
-            &pcbData);
-        if (pcbData == sizeof(StuckRectsData) && srd.pvData[0] == sizeof(StuckRectsData) && srd.pvData[1] == -2)
+        HWND hwndTray = FindWindowW(L"Shell_TrayWnd", NULL);
+        if (hwndTray)
         {
-            dwTaskbarPosition = srd.pvData[3];
-            if (GUI_TaskbarStyle == 0)
-            {
-                if (srd.pvData[3] != 1 && srd.pvData[3] != 3) // Disallow left/right settings for Windows 11 taskbar, as this breaks it
-                {
-                    srd.pvData[3] = 3;
-                }
-            }
-            *(DWORD*)lpData = srd.pvData[3];
-            return ERROR_SUCCESS;
+            dwTaskbarPosition = *(DWORD*)lpData = (DWORD)SendMessageW(hwndTray, WM_USER + 0x1CA, 5, 0); // -> TrayUI::_HandleTrayPrivateSettingMessage(5, 0)
         }
-        return ERROR_ACCESS_DENIED;
+        else
+        {
+            StuckRectsData srd;
+            DWORD pcbData = sizeof(StuckRectsData);
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StuckRectsLegacy",
+                L"Settings",
+                REG_BINARY,
+                NULL,
+                &srd,
+                &pcbData);
+            if (pcbData == sizeof(StuckRectsData) && srd.pvData[0] == sizeof(StuckRectsData) && srd.pvData[1] == -2)
+            {
+                dwTaskbarPosition = *(DWORD*)lpData = srd.pvData[3];
+            }
+            else
+            {
+                return ERROR_ACCESS_DENIED;
+            }
+        }
+        if (GUI_TaskbarStyle == 0)
+        {
+            if (*(DWORD*)lpData != 1 && *(DWORD*)lpData != 3) // Disallow left/right settings for Windows 11 taskbar, as this breaks it
+            {
+                *(DWORD*)lpData = 3;
+            }
+        }
+        return ERROR_SUCCESS;
     }
     else if (!wcscmp(lpValueName, L"Virtualized_" _T(EP_CLSID) L"_MMTaskbarPosition"))
     {

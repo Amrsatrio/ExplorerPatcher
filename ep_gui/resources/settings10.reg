@@ -17,7 +17,7 @@
 ;y %R:1007% 🡕
 ;shell:::{05d7b0f4-2121-4eff-bf6b-ed3f69b894d9}\SystemIcons
 [HKEY_CURRENT_USER\Software\ExplorerPatcher]
-;c 4 %R:1008% *
+;c 4 %R:1008%
 ;x 3 %R:1009%
 ;x 1 %R:1010%
 ;x 0 %R:1011%
