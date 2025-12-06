@@ -12945,150 +12945,7 @@ DWORD InjectStartMenu()
     return 0;
 }
 
-void InjectShellExperienceHost()
-{
-#if WITH_MAIN_PATCHER
-    HKEY hKey;
-    if (RegOpenKeyW(HKEY_CURRENT_USER, _T(SEH_REGPATH), &hKey) != ERROR_SUCCESS)
-    {
-        return;
-    }
-    RegCloseKey(hKey);
-    HMODULE hQA = LoadLibraryW(L"Windows.UI.QuickActions.dll");
-    if (hQA)
-    {
-        PIMAGE_DOS_HEADER dosHeader = hQA;
-        if (dosHeader->e_magic == IMAGE_DOS_SIGNATURE)
-        {
-            PIMAGE_NT_HEADERS64 ntHeader = (PIMAGE_NT_HEADERS64)((u_char*)dosHeader + dosHeader->e_lfanew);
-            if (ntHeader->Signature == IMAGE_NT_SIGNATURE)
-            {
-                PBYTE pSEHPatchArea = NULL;
-                BYTE seh_pattern1[14] =
-                {
-                    // mov al, 1
-                    0xB0, 0x01,
-                    // jmp + 2
-                    0xEB, 0x02,
-                    // xor al, al
-                    0x32, 0xC0,
-                    // add rsp, 0x20
-                    0x48, 0x83, 0xC4, 0x20,
-                    // pop rdi
-                    0x5F,
-                    // pop rsi
-                    0x5E,
-                    // pop rbx
-                    0x5B,
-                    // ret
-                    0xC3
-                };
-                BYTE seh_off = 12;
-                BYTE seh_pattern2[5] =
-                {
-                    // mov r8b, 3
-                    0x41, 0xB0, 0x03,
-                    // mov dl, 1
-                    0xB2, 0x01
-                };
-                BOOL bTwice = FALSE;
-                PIMAGE_SECTION_HEADER section = IMAGE_FIRST_SECTION(ntHeader);
-                for (unsigned int i = 0; i < ntHeader->FileHeader.NumberOfSections; ++i)
-                {
-                    if (section->Characteristics & IMAGE_SCN_CNT_CODE)
-                    {
-                        if (section->SizeOfRawData && !bTwice)
-                        {
-                            PBYTE pSectionBegin = (PBYTE)hQA + section->VirtualAddress;
-                            //DWORD dwOldProtect;
-                            //VirtualProtect(pSectionBegin, section->SizeOfRawData, PAGE_EXECUTE_READWRITE, &dwOldProtect);
-                            PBYTE pCandidate = NULL;
-                            while (TRUE)
-                            {
-                                pCandidate = memmem(
-                                    !pCandidate ? pSectionBegin : pCandidate,
-                                    !pCandidate ? section->SizeOfRawData : (uintptr_t)section->SizeOfRawData - (uintptr_t)(pCandidate - pSectionBegin),
-                                    seh_pattern1,
-                                    sizeof(seh_pattern1)
-                                );
-                                if (!pCandidate)
-                                {
-                                    break;
-                                }
-                                PBYTE pCandidate2 = pCandidate - seh_off - sizeof(seh_pattern2);
-                                if (pCandidate2 > section->VirtualAddress)
-                                {
-                                    if (memmem(pCandidate2, sizeof(seh_pattern2), seh_pattern2, sizeof(seh_pattern2)))
-                                    {
-                                        if (!pSEHPatchArea)
-                                        {
-                                            pSEHPatchArea = pCandidate;
-                                        }
-                                        else
-                                        {
-                                            bTwice = TRUE;
-                                        }
-                                    }
-                                }
-                                pCandidate += sizeof(seh_pattern1);
-                            }
-                            //VirtualProtect(pSectionBegin, section->SizeOfRawData, dwOldProtect, &dwOldProtect);
-                        }
-                    }
-                    section++;
-                }
-                if (pSEHPatchArea && !bTwice)
-                {
-                    DWORD dwOldProtect;
-                    VirtualProtect(pSEHPatchArea, sizeof(seh_pattern1), PAGE_EXECUTE_READWRITE, &dwOldProtect);
-                    pSEHPatchArea[2] = 0x90;
-                    pSEHPatchArea[3] = 0x90;
-                    VirtualProtect(pSEHPatchArea, sizeof(seh_pattern1), dwOldProtect, &dwOldProtect);
-                }
-            }
-        }
-    }
-#endif
-}
-
-// On 22H2 builds, the Windows 10 flyouts for network and battery can be enabled
-// by patching either of the following functions in ShellExperienceHost. I didn't
-// see any differences when patching with any of the 3 methods, although
-// `SharedUtilities::IsWindowsLite` seems to be invoked in more places, whereas `GetProductInfo`
-// and `RtlGetDeviceFamilyInfoEnum` are only called in `FlightHelper::CalculateRepaintEnabled`
-// and either seems to get the job done. YMMV
-
-LSTATUS SEH_RegGetValueW(HKEY hkey, LPCWSTR lpSubKey, LPCWSTR lpValue, DWORD dwFlags, LPDWORD pdwType, PVOID pvData, LPDWORD pcbData) {
-    if (!lstrcmpW(lpValue, L"UseLiteLayout")) { *(DWORD*)pvData = 1; return ERROR_SUCCESS; }
-    return RegGetValueW(hkey, lpSubKey, lpValue, dwFlags, pdwType, pvData, pcbData);
-}
-
-BOOL SEH_RtlGetDeviceFamilyInfoEnum(INT64 u0, PDWORD u1, INT64 u2) {
-    *u1 = 10;
-    return TRUE;
-}
-
-BOOL SEH_GetProductInfo(DWORD dwOSMajorVersion, DWORD dwOSMinorVersion, DWORD dwSpMajorVersion, DWORD dwSpMinorVersion, PDWORD pdwReturnedProductType) {
-    *pdwReturnedProductType = 119;
-    return TRUE;
-}
-
-void InjectShellExperienceHostFor22H2OrHigher() {
-#if WITH_MAIN_PATCHER
-    if (!IsWindows11Version22H2Build1413OrHigher())
-    {
-        HKEY hKey;
-        if (RegOpenKeyW(HKEY_CURRENT_USER, _T(SEH_REGPATH), &hKey) == ERROR_SUCCESS)
-        {
-            RegCloseKey(hKey);
-            HMODULE hQA = LoadLibraryW(L"Windows.UI.QuickActions.dll");
-            if (hQA) VnPatchIAT(hQA, "api-ms-win-core-sysinfo-l1-2-0.dll", "GetProductInfo", SEH_GetProductInfo);
-            // if (hQA) VnPatchIAT(hQA, "ntdll.dll", "RtlGetDeviceFamilyInfoEnum", SEH_RtlGetDeviceFamilyInfoEnum);
-            // if (hQA) VnPatchIAT(hQA, "api-ms-win-core-registry-l1-1-0.dll", "RegGetValueW", SEH_RegGetValueW);
-        }
-    }
-#endif
-}
+void InjectShellExperienceHost();
 
 #if WITH_MAIN_PATCHER
 bool IsUserOOBE()
@@ -13246,15 +13103,8 @@ HRESULT EntryPoint(DWORD dwMethod)
     }
     else if (bIsThisShellEH)
     {
-        if (IsWindows11Version22H2OrHigher())
-        {
-            InjectShellExperienceHostFor22H2OrHigher();
-        }
-        else if (IsWindows11())
-        {
-            InjectShellExperienceHost();
-        }
 #if WITH_MAIN_PATCHER
+        InjectShellExperienceHost();
         if (IsXamlSoundsEnabled())
         {
             HMODULE hWindowsUIXaml = LoadLibraryW(L"Windows.UI.Xaml.dll");

@@ -1061,6 +1061,13 @@ __forceinline DWORD ARM64_MakeB(int imm26)
     return 0b000101 << 26 | imm26 & (1 << 26) - 1;
 }
 
+__forceinline DWORD ARM64_MakeBL(int imm26)
+{
+    if (!ARM64_IsInRange(imm26, 26))
+        return 0;
+    return 0b100101 << 26 | imm26 & (1 << 26) - 1;
+}
+
 __forceinline DWORD ARM64_CBZWToB(DWORD insnCBZW)
 {
     if (!ARM64_IsCBZW(insnCBZW))

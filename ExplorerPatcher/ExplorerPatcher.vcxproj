@@ -234,6 +234,9 @@
       <ExcludedFromBuild Condition="'$(WithMainPatcher)'!='true'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="SettingsMonitor.c" />
+    <ClCompile Include="ShellExperienceHostPatches.cpp">
+      <ExcludedFromBuild Condition="'$(WithMainPatcher)'!='true'">true</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="StartMenu.c">
       <ExcludedFromBuild Condition="'$(WithMainPatcher)'!='true'">true</ExcludedFromBuild>
     </ClCompile>
