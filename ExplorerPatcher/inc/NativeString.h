@@ -857,7 +857,13 @@ namespace Windows::Internal
 
         void _Attach(WCHAR* psz)
         {
-            return _Attach(psz, wcslen(psz) + 1);
+            if (_pszStringData)
+            {
+                Allocator::Free(_pszStringData);
+            }
+            _pszStringData = psz;
+            _cchStringData = s_cchUnknown;
+            _cchStringDataCapacity = s_cchUnknown;
         }
 
         void _Attach(WCHAR* psz, const size_t cch)

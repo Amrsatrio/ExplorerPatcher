@@ -31,7 +31,7 @@ class CSimpleArrayStandardMergeHelper
 
 template <
     typename T,
-    typename CompareHelper
+    typename CompareHelper = CSimpleArrayStandardCompareHelper<T>
 >
 class CTSimpleFixedArray
 {
@@ -43,6 +43,18 @@ public:
         : _parray(nullptr)
         , _celem(0)
     {
+    }
+
+    CTSimpleFixedArray(T* const parray, size_t celem)
+        : _parray(parray)
+        , _celem(celem)
+    {
+    }
+
+    void SetData(T* const parray, size_t celem)
+    {
+        _parray = parray;
+        _celem = celem;
     }
 
     size_t GetSize() const { return _celem; }
@@ -164,7 +176,7 @@ template <
     typename T,
     size_t MaxSize,
     typename Allocator,
-    typename CompareHelper,
+    typename CompareHelper = CSimpleArrayStandardCompareHelper<T>,
     typename MergeHelper = CSimpleArrayStandardMergeHelper<T>
 >
 class CTSimpleArray : public CTSimpleFixedArray<T, CompareHelper>
@@ -273,6 +285,14 @@ public:
         other->_celem = 0;
         other->_parrayT = nullptr;
         other->_celemCapacity = 0;
+    }
+
+    void Attach(T* parray, size_t celem)
+    {
+        RemoveAll();
+        this->_parray = parray;
+        this->_celem = celem;
+        _celemCapacity = celem;
     }
 
     size_t GetCapacity() const
@@ -518,7 +538,7 @@ class CLocalSimpleArray : public CTSimpleArray<T, MaxSize, CTPolicyLocalMem<T>, 
 template <
     typename T,
     typename ElementAllocator,
-    typename CompareHelper = CSimpleArrayStandardCompareHelper<T>
+    typename CompareHelper = CSimpleArrayStandardCompareHelper<T*>
 >
 class CSimplePointerArray : public CCoSimpleArray<T*, UINT_MAX - 1, CompareHelper>
 {
