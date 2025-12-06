@@ -153,6 +153,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
     <ClCompile>
+      <Optimization>MinSpace</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>NDEBUG;WINRT_NO_SOURCE_LOCATION;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -300,12 +301,16 @@
     <ClInclude Include="TaskbarCenter.h" />
     <ClInclude Include="updates.h" />
     <ClInclude Include="utility.h" />
+    <ClInclude Include="inc\ClassicWinRtForwardDecl.h" />
     <ClInclude Include="inc\ContainerPolicies.h" />
     <ClInclude Include="inc\memsafe.h" />
     <ClInclude Include="inc\NativeString.h" />
+    <ClInclude Include="inc\PopNoWilResultMacrosLogging.h" />
+    <ClInclude Include="inc\PushNoWilResultMacrosLogging.h" />
     <ClInclude Include="inc\RefCountedObject.h" />
     <ClInclude Include="inc\ResultUtils.h" />
     <ClInclude Include="inc\SimpleArray.h" />
+    <ClInclude Include="inc\SimpleBoxer.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="ExplorerPatcher.rc" />

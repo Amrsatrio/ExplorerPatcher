@@ -1,16 +1,21 @@
 ﻿#include <windows.ui.xaml.h>
 
 #include <wrl/client.h>
+#include <wrl/implements.h>
 #include <wrl/wrappers/corewrappers.h>
 #include <wil/result_macros.h>
-#include <winrt/Windows.Foundation.h> // REMOVE ME!!
-#include <winrt/Windows.UI.Xaml.h> // REMOVE ME!!
 
+// ReSharper disable once CppUnusedIncludeDirective
+#include "ClassicWinRtForwardDecl.h"
 #include "def.h"
 #include "hooking.h"
 #include "osutility.h"
+#include "SimpleBoxer.h"
 #include "utility.h"
 #include "valinet/hooking/iatpatch.h"
+
+// We don't need logging here
+#include "inc/PushNoWilResultMacrosLogging.h"
 
 using namespace Microsoft::WRL;
 
@@ -328,137 +333,115 @@ HRESULT WINAPI NetworkUX_WindowsCreateStringReference(
     return WindowsCreateStringReference(sourceString, length, hstringHeader, string);
 }
 
+HRESULT NetworkUX_PatchResourceDictionary()
+{
+    SimpleBoxer_WilInitVars();
+    ComPtr<IInspectable> spKey, spValue;
+
+    ComPtr<wfc::IMap<IInspectable*, IInspectable*>> spResourceDictionary_Map; // = wux::Application::Current().Resources();
+    {
+        ComPtr<wux::IApplicationStatics> spApplicationStatics;
+        RETURN_IF_FAILED(Windows::Foundation::GetActivationFactory(
+            Wrappers::HStringReference(RuntimeClass_Windows_UI_Xaml_Application).Get(), &spApplicationStatics));
+
+        ComPtr<wux::IApplication> spApplication;
+        RETURN_IF_FAILED(spApplicationStatics->get_Current(&spApplication));
+
+        ComPtr<wux::IResourceDictionary> spResourceDictionary;
+        RETURN_IF_FAILED(spApplication->get_Resources(&spResourceDictionary));
+        RETURN_IF_FAILED(spResourceDictionary.As(&spResourceDictionary_Map));
+    }
+
+    ComPtr<IInspectable> spQuickActionPanelMargin; // = spResourceDictionary.Lookup(L"QuickActionPanelMargin");
+    ComPtr<wux::IStyle> spQuickActionControlStyle; // = spResourceDictionary.Lookup(L"QuickActionControlStyle").try_as<wux::IStyle>();
+    {
+        {
+            RETURN_IF_FAILED(SimpleBoxer_BoxValue(L"QuickActionPanelMargin", &spKey));
+            spResourceDictionary_Map->Lookup(spKey.Get(), &spQuickActionPanelMargin);
+        }
+        {
+            ComPtr<IInspectable> spQuickActionControlStyle_Object;
+            RETURN_IF_FAILED(SimpleBoxer_BoxValue(L"QuickActionControlStyle", &spKey));
+            if (SUCCEEDED(spResourceDictionary_Map->Lookup(spKey.Get(), &spQuickActionControlStyle_Object)))
+            {
+                spQuickActionControlStyle_Object.As(&spQuickActionControlStyle);
+            }
+        }
+    }
+
+    // Old: <Thickness x:Key="QuickActionPanelMargin" Value="12,0,0,12" /> <-- change back to this
+    // New: <Thickness x:Key="QuickActionPanelMargin" Value="12,0,24,0" />
+    if (spQuickActionPanelMargin.Get())
+    {
+        boolean bReplaced;
+        RETURN_IF_FAILED_EXPECTED(SimpleBoxer_BoxValue(L"QuickActionPanelMargin", &spKey));
+        RETURN_IF_FAILED_EXPECTED(SimpleBoxer_BoxValue(wux::Thickness(12.0, 0.0, 0.0, 12.0), &spValue));
+        RETURN_IF_FAILED(spResourceDictionary_Map->Insert(spKey.Get(), spValue.Get(), &bReplaced));
+    }
+
+    // Old: Margin=(4,0,0,4) Width=90 Height=64 <-- change back to this
+    // New: Margin=(12,0,0,0) Width=96 Height=90
+    if (spQuickActionControlStyle.Get())
+    {
+        ComPtr<wfc::IVector<wux::SetterBase*>> spSetters_Vector; // = spQuickActionControlStyle.Setters();
+        {
+            ComPtr<wux::ISetterBaseCollection> spSetters;
+            RETURN_IF_FAILED(spQuickActionControlStyle->get_Setters(&spSetters));
+            RETURN_IF_FAILED(spSetters.As(&spSetters_Vector));
+        }
+
+        RETURN_IF_FAILED(spSetters_Vector->Clear());
+
+        ComPtr<wux::ISetterFactory> spSetterFactory;
+        RETURN_IF_FAILED(Windows::Foundation::GetActivationFactory(
+            Wrappers::HStringReference(RuntimeClass_Windows_UI_Xaml_Setter).Get(), &spSetterFactory));
+
+        ComPtr<wux::IDependencyProperty> spMarginProperty, spWidthProperty, spHeightProperty;
+        {
+            ComPtr<wux::IFrameworkElementStatics> spFrameworkElementStatics;
+            RETURN_IF_FAILED(Windows::Foundation::GetActivationFactory(
+                Wrappers::HStringReference(RuntimeClass_Windows_UI_Xaml_FrameworkElement).Get(), &spFrameworkElementStatics));
+
+            RETURN_IF_FAILED(spFrameworkElementStatics->get_MarginProperty(&spMarginProperty));
+            RETURN_IF_FAILED(spFrameworkElementStatics->get_WidthProperty(&spWidthProperty));
+            RETURN_IF_FAILED(spFrameworkElementStatics->get_HeightProperty(&spHeightProperty));
+        }
+
+        struct
+        {
+            wux::IDependencyProperty* pProperty;
+            ComPtr<IInspectable> spValue;
+        } rgSettersToAdd[] =
+        {
+            { spMarginProperty.Get(), SimpleBoxer_InlineBoxValue(wux::Thickness(4.0, 0.0, 0.0, 4.0)) },
+            { spWidthProperty.Get(), SimpleBoxer_InlineBoxValue(90.0) },
+            { spHeightProperty.Get(), SimpleBoxer_InlineBoxValue(64.0) },
+        };
+
+        for (const auto& entry : rgSettersToAdd)
+        {
+            RETURN_IF_NULL_ALLOC(entry.spValue);
+
+            ComPtr<wux::ISetter> spSetter;
+            RETURN_IF_FAILED(spSetterFactory->CreateInstance(entry.pProperty, entry.spValue.Get(), &spSetter));
+
+            ComPtr<wux::ISetterBase> spSetter_Base;
+            RETURN_IF_FAILED(spSetter.As(&spSetter_Base));
+            RETURN_IF_FAILED(spSetters_Vector->Append(spSetter_Base.Get()));
+        }
+    }
+
+    return S_OK;
+}
+
 void (*NetworkUX_App_LoadResourceDictionariesFunc)();
 void NetworkUX_App_LoadResourceDictionariesHook()
 {
     NetworkUX_App_LoadResourceDictionariesFunc();
 
-    auto PatchResourceDictionary = []() -> HRESULT
-    {
-        ComPtr<IInspectable> spKey, spValue;
-
-        ComPtr<wfc::IMap<IInspectable*, IInspectable*>> spResourceDictionary_Map; // = wux::Application::Current().Resources();
-        {
-            ComPtr<wux::IApplicationStatics> spApplicationStatics;
-            RETURN_IF_FAILED(Windows::Foundation::GetActivationFactory(
-                Wrappers::HStringReference(RuntimeClass_Windows_UI_Xaml_Application).Get(), &spApplicationStatics));
-
-            ComPtr<wux::IApplication> spApplication;
-            RETURN_IF_FAILED(spApplicationStatics->get_Current(&spApplication));
-
-            ComPtr<wux::IResourceDictionary> spResourceDictionary;
-            RETURN_IF_FAILED(spApplication->get_Resources(&spResourceDictionary));
-            RETURN_IF_FAILED(spResourceDictionary.As(&spResourceDictionary_Map));
-        }
-
-        ComPtr<IInspectable> spQuickActionPanelMargin; // = spResourceDictionary.Lookup(L"QuickActionPanelMargin");
-        ComPtr<wux::IStyle> spQuickActionControlStyle; // = spResourceDictionary.Lookup(L"QuickActionControlStyle").try_as<wux::IStyle>();
-        {
-            {
-                // RETURN_IF_FAILED(SimpleBoxer::BoxValue(L"QuickActionPanelMargin", &spKey));
-                try { spKey.Attach((IInspectable*)winrt::detach_abi(winrt::box_value(L"QuickActionPanelMargin"))); } CATCH_RETURN()
-                spResourceDictionary_Map->Lookup(spKey.Get(), &spQuickActionPanelMargin);
-            }
-            {
-                // RETURN_IF_FAILED(SimpleBoxer::BoxValue(L"QuickActionControlStyle", &spKey));
-                try { spKey.Attach((IInspectable*)winrt::detach_abi(winrt::box_value(L"QuickActionControlStyle"))); } CATCH_RETURN()
-                ComPtr<IInspectable> spQuickActionControlStyle_Object;
-                if (SUCCEEDED(spResourceDictionary_Map->Lookup(spKey.Get(), &spQuickActionControlStyle_Object)))
-                {
-                    spQuickActionControlStyle_Object.As(&spQuickActionControlStyle);
-                }
-            }
-        }
-
-        // Old: <Thickness x:Key="QuickActionPanelMargin" Value="12,0,0,12" />
-        // New: <Thickness x:Key="QuickActionPanelMargin" Value="12,0,24,0" />
-        // Change to <Thickness x:Key="QuickActionPanelMargin" Value="12,0,12,0" /> to prevent 4th item from being clipped
-        if (spQuickActionPanelMargin.Get())
-        {
-            wux::Thickness thick;
-            try
-            {
-                winrt::Windows::Foundation::IInspectable spWinrtQuickActionPanelMargin;
-                spQuickActionPanelMargin.CopyTo((IInspectable**)winrt::put_abi(spWinrtQuickActionPanelMargin));
-                *(winrt::Windows::UI::Xaml::Thickness*)&thick = winrt::unbox_value<winrt::Windows::UI::Xaml::Thickness>(spWinrtQuickActionPanelMargin);
-            }
-            CATCH_RETURN()
-
-            wux::Thickness thickExpected = { 12.0, 0.0, 24.0, 0.0 };
-            if (!memcmp(&thick, &thickExpected, sizeof(wux::Thickness)))
-            {
-                thick.Right = 12.0;
-
-                // spResourceDictionary.Insert(L"QuickActionPanelMargin", winrt::box_value(thicknessQuickActionPanelMargin));
-
-                boolean bReplaced;
-                // RETURN_IF_FAILED(SimpleBoxer::BoxValue(L"QuickActionPanelMargin", &spKey));
-                try { spKey.Attach((IInspectable*)winrt::detach_abi(winrt::box_value(L"QuickActionPanelMargin"))); } CATCH_RETURN()
-                // RETURN_IF_FAILED(SimpleBoxer::BoxValue(thicknessQuickActionPanelMargin, &spValue));
-                try { spValue.Attach((IInspectable*)winrt::detach_abi(winrt::box_value(*(winrt::Windows::UI::Xaml::Thickness*)&thick))); } CATCH_RETURN()
-                RETURN_IF_FAILED(spResourceDictionary_Map->Insert(spKey.Get(), spValue.Get(), &bReplaced));
-            }
-        }
-
-        // Old: Margin=(4,0,0,4) Width=90 Height=64 <-- change back to this
-        // New: Margin=(12,0,0,0) Width=96 Height=90
-        if (spQuickActionControlStyle.Get())
-        {
-            ComPtr<wfc::IVector<wux::SetterBase*>> spSetters_Vector; // = spQuickActionControlStyle.Setters();
-            {
-                ComPtr<wux::ISetterBaseCollection> spSetters;
-                RETURN_IF_FAILED(spQuickActionControlStyle->get_Setters(&spSetters));
-                RETURN_IF_FAILED(spSetters.As(&spSetters_Vector));
-            }
-
-            RETURN_IF_FAILED(spSetters_Vector->Clear());
-
-            ComPtr<wux::ISetterFactory> spSetterFactory;
-            RETURN_IF_FAILED(Windows::Foundation::GetActivationFactory(
-                Wrappers::HStringReference(RuntimeClass_Windows_UI_Xaml_Setter).Get(), &spSetterFactory));
-
-            ComPtr<wux::IDependencyProperty> spMarginProperty, spWidthProperty, spHeightProperty;
-            {
-                ComPtr<wux::IFrameworkElementStatics> spFrameworkElementStatics;
-                RETURN_IF_FAILED(Windows::Foundation::GetActivationFactory(
-                    Wrappers::HStringReference(RuntimeClass_Windows_UI_Xaml_FrameworkElement).Get(), &spFrameworkElementStatics));
-
-                RETURN_IF_FAILED(spFrameworkElementStatics->get_MarginProperty(&spMarginProperty));
-                RETURN_IF_FAILED(spFrameworkElementStatics->get_WidthProperty(&spWidthProperty));
-                RETURN_IF_FAILED(spFrameworkElementStatics->get_HeightProperty(&spHeightProperty));
-            }
-
-            auto AddSetter = [&](wux::IDependencyProperty* pProperty, IInspectable* pValue) -> HRESULT
-            {
-                ComPtr<wux::ISetter> spSetter;
-                RETURN_IF_FAILED(spSetterFactory->CreateInstance(pProperty, pValue, &spSetter));
-
-                ComPtr<wux::ISetterBase> spSetter_Base;
-                RETURN_IF_FAILED(spSetter.As(&spSetter_Base));
-                RETURN_HR(spSetters_Vector->Append(spSetter_Base.Get()));
-            };
-
-            // spSetters.Append(wux::Setter(wux::FrameworkElement::MarginProperty(), wux::Thickness(4, 0, 0, 4)));
-            // RETURN_IF_FAILED(SimpleBoxer::BoxValue(wux::Thickness{ 4.0, 0.0, 0.0, 4.0 }, &spValue));
-            try { spValue.Attach((IInspectable*)winrt::detach_abi(winrt::box_value(winrt::Windows::UI::Xaml::Thickness{ 4.0, 0.0, 0.0, 4.0 }))); } CATCH_RETURN()
-            RETURN_IF_FAILED(AddSetter(spMarginProperty.Get(), spValue.Get()));
-
-            // spSetters.Append(wux::Setter(wux::FrameworkElement::WidthProperty(), 90.0));
-            // RETURN_IF_FAILED(SimpleBoxer::BoxValue(90.0, &spValue));
-            try { spValue.Attach((IInspectable*)winrt::detach_abi(winrt::box_value(90.0))); } CATCH_RETURN()
-            RETURN_IF_FAILED(AddSetter(spWidthProperty.Get(), spValue.Get()));
-
-            // spSetters.Append(wux::Setter(wux::FrameworkElement::HeightProperty(), 64.0));
-            // RETURN_IF_FAILED(SimpleBoxer::BoxValue(64.0, &spValue));
-            try { spValue.Attach((IInspectable*)winrt::detach_abi(winrt::box_value(64.0))); } CATCH_RETURN()
-            RETURN_IF_FAILED(AddSetter(spHeightProperty.Get(), spValue.Get()));
-        }
-
-        return S_OK;
-    };
     if (g_bQuickActionControlTemplatesPatched)
     {
-        PatchResourceDictionary();
+        NetworkUX_PatchResourceDictionary();
     }
 }
 
@@ -484,13 +467,13 @@ void HandleLoadedNetworkUX(HMODULE hModule)
     {
 #if defined(_M_X64)
         // NetworkUX::App::LoadResourceDictionaries()
-        // 48 8B 40 10 E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? 80 3D ?? ?? ?? ?? 00 75 05 E8 ?? ?? ?? ?? E8
+        // 48 8B 40 10 E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? 80 3D ?? ?? ?? ?? 00 75 05 E8
         //                            .  ^^^^^^^^^^^
         // Ref: NetworkUX::App::StaticOnLaunched()
         PBYTE match = (PBYTE)FindPattern(
             pSearch, cbSearch,
-            "\x48\x8B\x40\x10\xE8\x00\x00\x00\x00\xE8\x00\x00\x00\x00\x80\x3D\x00\x00\x00\x00\x00\x75\x05\xE8\x00\x00\x00\x00\xE8",
-            "xxxxx????x????xx????xxxx????x"
+            "\x48\x8B\x40\x10\xE8\x00\x00\x00\x00\xE8\x00\x00\x00\x00\x80\x3D\x00\x00\x00\x00\x00\x75\x05\xE8",
+            "xxxxx????x????xx????xxxx"
         );
         if (match)
         {
@@ -580,3 +563,5 @@ void InjectShellExperienceHostFor22H2OrHigher()
 }
 
 EXTERN_C_END
+
+#include "inc/PopNoWilResultMacrosLogging.h"

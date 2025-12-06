@@ -1,0 +1,10 @@
+// ReSharper disable once CppMissingIncludeGuard
+#pragma pop_macro("RETURN_IF_NTSTATUS_FAILED")
+#pragma pop_macro("RETURN_LAST_ERROR_IF_NULL")
+#pragma pop_macro("RETURN_LAST_ERROR_IF")
+#pragma pop_macro("RETURN_HR_IF_NULL")
+#pragma pop_macro("RETURN_HR_IF")
+#pragma pop_macro("RETURN_IF_NULL_ALLOC")
+#pragma pop_macro("RETURN_IF_WIN32_ERROR")
+#pragma pop_macro("RETURN_IF_WIN32_BOOL_FALSE")
+#pragma pop_macro("RETURN_IF_FAILED")
