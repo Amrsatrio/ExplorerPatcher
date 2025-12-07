@@ -147,7 +147,7 @@ struct reference_traits
     {
         HRESULT hr = E_OUTOFMEMORY;
         Microsoft::WRL::ComPtr<Reference<T>> spReference = Microsoft::WRL::Make<Reference<T>>(value);
-        if (SUCCEEDED(hr))
+        if (spReference.Get())
         {
             *ppPropertyValue = static_cast<ABI::Windows::Foundation::IReference<T>*>(spReference.Detach());
             hr = S_OK;

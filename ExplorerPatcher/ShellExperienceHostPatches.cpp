@@ -374,8 +374,8 @@ HRESULT NetworkUX_PatchResourceDictionary()
     if (spQuickActionPanelMargin.Get())
     {
         boolean bReplaced;
-        RETURN_IF_FAILED_EXPECTED(SimpleBoxer_BoxValue(L"QuickActionPanelMargin", &spKey));
-        RETURN_IF_FAILED_EXPECTED(SimpleBoxer_BoxValue(wux::Thickness(12.0, 0.0, 0.0, 12.0), &spValue));
+        RETURN_IF_FAILED(SimpleBoxer_BoxValue(L"QuickActionPanelMargin", &spKey));
+        RETURN_IF_FAILED(SimpleBoxer_BoxValue(wux::Thickness(12.0, 0.0, 0.0, 12.0), &spValue));
         RETURN_IF_FAILED(spResourceDictionary_Map->Insert(spKey.Get(), spValue.Get(), &bReplaced));
     }
 
