@@ -9321,10 +9321,9 @@ static void PatchAddressBarSizing(PBYTE pSearchBegin, size_t cbSearch)
             "\xBA\x04\x00\x00\x00\x0F\x95\xC0\x84\xC0\x75\x02\x8B\xD6",
             "xxxxxxxxxxxxxx"
         );
-        if (match && VirtualProtect(match, 5, PAGE_EXECUTE_READWRITE, &dwOldProtect))
+        if (match)
         {
-            *(int*)(match + 1) = 1;
-            VirtualProtect(match, 5, dwOldProtect, &dwOldProtect);
+            match += 1; // Point to 04 00 00 00
         }
         else
         {
@@ -9338,14 +9337,35 @@ static void PatchAddressBarSizing(PBYTE pSearchBegin, size_t cbSearch)
                 "\xC7\x44\x24\x00\x04\x00\x00\x00\x84\xC0\x75\x08\xC7\x44\x24\x00\x01\x00\x00\x00",
                 "xxx?xxxxxxxxxxx?xxxx"
             );
-            if (match && VirtualProtect(match, 8, PAGE_EXECUTE_READWRITE, &dwOldProtect))
+            if (match)
             {
-                *(int*)(match + 4) = 1;
-                VirtualProtect(match, 8, dwOldProtect, &dwOldProtect);
+                match += 4; // Point to 04 00 00 00
+            }
+            else
+            {
+                // Feature flag always enabled & removed, Germanium 26100.7262+ & Bromine 28000.1362+ (NB: Nickel never got this treatment)
+                // CAddressBand::ResizeToolbarButtons()
+                // 8B 7B 0C 2B 7B 04 48 8B 4E 48 48 8D 54 24 ?? 45 33 C0 C7 44 24 ?? 04 00 00 00 E8
+                //                                                                   xxxxxxxxxxx To 01 00 00 00
+                match = FindPattern(
+                    pSearchBegin,
+                    cbSearch,
+                    "\x8B\x7B\x0C\x2B\x7B\x04\x48\x8B\x4E\x48\x48\x8D\x54\x24\x00\x45\x33\xC0\xC7\x44\x24\x00\x04\x00\x00\x00\xE8",
+                    "xxxxxxxxxxxxxx?xxxxxx?xxxxx"
+                );
+                if (match)
+                {
+                    match += 22; // Point to 04 00 00 00
+                }
             }
         }
-        // TODO Revisit once forced-on
+        if (match && VirtualProtect(match, 4, PAGE_EXECUTE_READWRITE, &dwOldProtect))
+        {
+            *(int*)match = 1;
+            VirtualProtect(match, 4, dwOldProtect, &dwOldProtect);
+        }
 #elif defined(_M_ARM64)
+        DWORD insnNew = 0;
         // Feature flag present, target register W1 (Nickel)
         // CAddressBand::ResizeToolbarButtons()
         // CAddressBand::_PositionChildWindows() <- CAddressBand::ResizeToolbarButtons()
@@ -9359,11 +9379,8 @@ static void PatchAddressBarSizing(PBYTE pSearchBegin, size_t cbSearch)
         );
         if (match)
         {
-            if (VirtualProtect(match, 4, PAGE_EXECUTE_READWRITE, &dwOldProtect))
-            {
-                *(DWORD*)(match + 0) = 0x52800021; // MOV W1, #1
-                VirtualProtect(match, 4, dwOldProtect, &dwOldProtect);
-            }
+            match += 0; // Point to 81 00 80 52
+            insnNew = 0x52800021; // MOV W1, #1
         }
         else
         {
@@ -9377,13 +9394,54 @@ static void PatchAddressBarSizing(PBYTE pSearchBegin, size_t cbSearch)
                 "\x88\x00\x80\x52\x02\x00\x00\x14\x28\x00\x80\x52",
                 "xxxxxxxxxxxx"
             );
-            if (match && VirtualProtect(match, 4, PAGE_EXECUTE_READWRITE, &dwOldProtect))
+            if (match)
             {
-                *(DWORD*)(match + 0) = 0x52800028; // MOV W8, #1
-                VirtualProtect(match, 4, dwOldProtect, &dwOldProtect);
+                match += 0; // Point to 88 00 80 52
+                insnNew = 0x52800028; // MOV W8, #1
+            }
+            else
+            {
+                // Feature flag always enabled & removed, Germanium 26100.7262+ & Bromine 28000.1362+ (NB: Nickel never got this treatment)
+                // CAddressBand::ResizeToolbarButtons()
+                // SHLogicalToPhysicalDPI non-inlined (GE ARM64 & ARM64EC; BR ARM64EC)
+                // ?? 01 08 4B ?? ?? ?? ?? 88 00 80 52 02 00 80 D2 ?? 13 00 B9 ?? 43 00 91 ?? ?? ?? ?? ?? 13 40 B9
+                //                         xxxxxxxxxxx To 28 00 80 52
+                match = FindPattern_4_(
+                    pSearchBegin + 1,
+                    cbSearch - 1,
+                    "\x01\x08\x4B\x00\x00\x00\x00\x88\x00\x80\x52\x02\x00\x80\xD2\x00\x13\x00\xB9\x00\x43\x00\x91\x00\x00\x00\x00\x00\x13\x40\xB9",
+                    "xxx????xxxxxxxx?xxx?xxx?????xxx"
+                );
+                if (match)
+                {
+                    match += 7; // Point to 88 00 80 52
+                    insnNew = 0x52800028; // MOV W8, #1
+                }
+                else
+                {
+                    // SHLogicalToPhysicalDPI inlined (BR ARM64)
+                    // Constant "4" passed directly to 1st arg of MulDiv (W0)
+                    // 02 0C 80 52 E1 03 ?? 2A 80 00 80 52 ?? ?? ?? ?? ?? ?? ?? 4B
+                    //                         xxxxxxxxxxx To 20 00 80 52
+                    match = FindPattern_4_(
+                        pSearchBegin,
+                        cbSearch,
+                        "\x02\x0C\x80\x52\xE1\x03\x00\x2A\x80\x00\x80\x52\x00\x00\x00\x00\x00\x00\x00\x4B",
+                        "xxxxxx?xxxxx???????x"
+                    );
+                    if (match)
+                    {
+                        match += 8; // Point 80 00 80 52
+                        insnNew = 0x52800020; // MOV W0, #1
+                    }
+                }
             }
         }
-        // TODO Revisit once forced-on
+        if (match && VirtualProtect(match, 4, PAGE_EXECUTE_READWRITE, &dwOldProtect))
+        {
+            *(DWORD*)match = insnNew;
+            VirtualProtect(match, 4, dwOldProtect, &dwOldProtect);
+        }
 #endif
     }
 }
