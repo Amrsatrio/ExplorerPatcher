@@ -1364,17 +1364,21 @@ void ForceEnableXamlSounds(HMODULE hWindowsUIXaml)
 #elif defined(_M_ARM64)
     // 08 ?? ?? B9 1F 09 00 71 ?? ?? ?? 54 ?? 00 00 35 ?? ?? ?? ??
     //                                                 ^^^^^^^^^^^ BL -> MOV W0, #1
-    PBYTE match = FindPattern_4_(
+    // BL:
+    // P: 0b100101_00000000000000000000000000 = 94000000 = 00 00 00 94
+    // M: 0b111111_00000000000000000000000000 = FC000000 = 00 00 00 FC
+    PBYTE match = FindPatternBitMask_4_(
         pWindowsUIXamlText,
         cbWindowsUIXamlText,
-        "\x08\x00\x00\xB9\x1F\x09\x00\x71\x00\x00\x00\x54\x00\x00\x00\x35",
-        "x??xxxxx???x?xxx"
+        "\x08\x00\x00\xB9\x1F\x09\x00\x71\x00\x00\x00\x54\x00\x00\x00\x35\x00\x00\x00\x94",
+        "\xFF\x00\x00\xFF\xFF\xFF\xFF\xFF\x00\x00\x00\xFF\x00\xFF\xFF\xFF\x00\x00\x00\xFC",
+        20
     );
     if (match)
     {
         match += 16;
-        DWORD currentInsn = *(DWORD*)match;
-        DWORD newInsn = ARM64_IsBL(currentInsn) ? 0x52800020 : 0; // MOV W0, #1
+        // DWORD currentInsn = *(DWORD*)match;
+        DWORD newInsn = /*ARM64_IsBL(currentInsn) ?*/ 0x52800020 /*: 0*/; // MOV W0, #1
         if (newInsn)
         {
             DWORD flOldProtect = 0;
@@ -9931,6 +9935,7 @@ static void PatchAppResolver()
         match += 5 + *(int*)(match + 1);
     }
 #elif defined(_M_ARM64)
+    // Nickel+
     // 7F 23 03 D5  FD 7B BC A9  F3 53 01 A9  F5 5B 02 A9  F7 1B 00 F9  FD 03 00 91  ?? ?? ?? ??  FF 43 01 D1  F7 03 00 91  30 00 80 92  F0 1A 00 F9  ?? 03 01 AA  ?? 03 02 AA  FF ?? 00 F9
     // ----------- PACIBSP, don't scan for this because it's everywhere
     PBYTE match = FindPattern_4_(
@@ -9942,6 +9947,22 @@ static void PatchAppResolver()
     if (match)
     {
         match -= 4;
+    }
+    else
+    {
+        // Cobalt
+        // 7F 23 03 D5  FD 7B BC A9  F3 53 01 A9  F5 5B 02 A9  F7 1B 00 F9  F9 1F 00 F9  FD 03 00 91  ?? ?? ?? ??  FF 43 01 D1  F7 03 00 91  30 00 80 92  F0 1A 00 F9  ?? 03 01 AA  ?? 03 02 AA  FF ?? 00 F9
+        // ----------- PACIBSP, don't scan for this because it's everywhere
+        match = (PBYTE)FindPattern_4_(
+            pAppResolverText,
+            cbAppResolverText,
+            "\xFD\x7B\xBC\xA9\xF3\x53\x01\xA9\xF5\x5B\x02\xA9\xF7\x1B\x00\xF9\xF9\x1F\x00\xF9\xFD\x03\x00\x91\x00\x00\x00\x00\xFF\x43\x01\xD1\xF7\x03\x00\x91\x30\x00\x80\x92\xF0\x1A\x00\xF9\x00\x03\x01\xAA\x00\x03\x02\xAA\xFF\x00\x00\xF9",
+            "xxxxxxxxxxxxxxxxxxxxxxxx????xxxxxxxxxxxxxxxx?xxx?xxxx?xx"
+        );
+        if (match)
+        {
+            match -= 4;
+        }
     }
 #endif
     if (match)
@@ -11990,18 +12011,18 @@ static BOOL StartMenu_FixContextMenuXbfHijackMethod()
         return FALSE;
 
 #if defined(_M_X64)
-    // 49 89 43 C8 E8 ?? ?? ?? ?? 85 C0
-    //                ^^^^^^^^^^^
+    // 48 8B 45 ?? 49 89 43 C8 E8 ?? ?? ?? ?? 85 C0
+    //                            ^^^^^^^^^^^
     // Ref: CCoreServices::LoadXamlResource()
     PBYTE match = FindPattern(
         pWindowsUIXamlText,
         cbWindowsUIXamlText,
-        "\x49\x89\x43\xC8\xE8\x00\x00\x00\x00\x85\xC0",
-        "xxxxx????xx"
+        "\x48\x8B\x45\x00\x49\x89\x43\xC8\xE8\x00\x00\x00\x00\x85\xC0",
+        "xxx?xxxxx????xx"
     );
     if (match)
     {
-        match += 4;
+        match += 8;
         match += 5 + *(int*)(match + 1);
     }
     else
@@ -12023,14 +12044,14 @@ static BOOL StartMenu_FixContextMenuXbfHijackMethod()
         }
     }
 #elif defined(_M_ARM64)
-    // E1 0B 40 F9 05 00 80 D2 04 00 80 D2 E3 03 ?? AA E2 03 ?? AA E0 03 ?? AA ?? ?? ?? 97
+    // E1 0B 40 F9 05 00 80 D2 04 00 80 D2 E3 03 ?? AA E2 03 ?? AA E0 03 ?? AA ?? ?? ?? ?? ?? 03 00 2A
     //                                                                         ^^^^^^^^^^^
     // Ref: CoreServices_TryGetApplicationResource()
     PBYTE match = FindPattern_4_(
         pWindowsUIXamlText,
         cbWindowsUIXamlText,
-        "\xE1\x0B\x40\xF9\x05\x00\x80\xD2\x04\x00\x80\xD2\xE3\x03\x00\xAA\xE2\x03\x00\xAA\xE0\x03\x00\xAA\x00\x00\x00\x97",
-        "xxxxxxxxxxxxxx?xxx?xxx?x???x"
+        "\xE1\x0B\x40\xF9\x05\x00\x80\xD2\x04\x00\x80\xD2\xE3\x03\x00\xAA\xE2\x03\x00\xAA\xE0\x03\x00\xAA\x00\x00\x00\x00\x00\x03\x00\x2A",
+        "xxxxxxxxxxxxxx?xxx?xxx?x?????xxx"
     );
     if (match)
     {
