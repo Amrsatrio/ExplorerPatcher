@@ -45,14 +45,14 @@ jobs:
           GITHUB_EVENT_INPUTS_BUILD_DIR: ${{ github.event.inputs.build_dir }}
 
       - name: Checkout latest build and submodules
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         if: github.event.inputs.ref == ''
         with:
           submodules: recursive
           persist-credentials: false
 
       - name: Checkout specific build and submodules
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         if: github.event.inputs.ref != ''
         with:
           ref: ${{ github.event.inputs.ref }}
@@ -60,7 +60,7 @@ jobs:
           persist-credentials: false
 
       - name: Add MSBuild to PATH
-        uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # 3.0.0
+        uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3.0.0
 
       - name: Declare some variables
         id: vars
@@ -81,7 +81,7 @@ jobs:
           exit /b 0
 
       - name: Setup NuGet
-        uses: nuget/setup-nuget@12c57947e9458a5b976961b08ea0706a17dd71ae # 3.0.0
+        uses: nuget/setup-nuget@fd55a6f3b34392fa83fde1454582407d8c714123 # v4.0
         with:
           nuget-version: '7.x'
 
@@ -95,7 +95,7 @@ jobs:
           BuildDependencies%BUILD_CONFIGURATION%.bat
 
       - name: Download ep_taskbar
-        uses: robinraju/release-downloader@daf26c55d821e836577a15f77d86ddc078948b05 # 1.12
+        uses: robinraju/release-downloader@28fc21f50d76778e7023361aa1f863e717d3d56f # v1.13
         with:
           repository: ExplorerPatcher/ep_taskbar_releases
           fileName: ep_taskbar.*.dll
@@ -188,7 +188,7 @@ jobs:
 
       - name: Upload artifacts
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ep_bin_multi_${{ steps.vars.outputs.sha_short }}_${{ steps.vars.outputs.branch }}
           path: |
@@ -230,7 +230,7 @@ jobs:
           STEPS_VARS_OUTPUTS_BRANCH: ${{ steps.vars.outputs.branch }}
 
       - name: Create/update release (valinet)
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # 2.6.1
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         if: github.repository_owner == 'valinet' && github.event_name == 'push' && github.ref_type == 'tag'
         id: create_release
         with:
@@ -246,7 +246,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.PAT }}
 
       - name: Create/update release (forks)
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # 2.6.1
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         if: github.repository_owner != 'valinet' && github.event_name == 'push' && github.ref_type == 'tag'
         id: create_release_fork
         with:
@@ -260,5 +260,3 @@ jobs:
             build/Release/ep_setup_arm64.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-
