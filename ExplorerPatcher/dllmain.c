@@ -10023,14 +10023,16 @@ static void PatchStartTileData(BOOL bSMEH)
 typedef struct CrashCounterSettings
 {
     BOOL bDisabled;
-    int counter;
-    int thresholdTime;
-    int threshold;
+    BOOL bShowMessage;
+    DWORD counter;
+    DWORD thresholdTime;
+    DWORD threshold;
 } CrashCounterSettings;
 
 void GetCrashCounterSettings(CrashCounterSettings* out)
 {
     out->bDisabled = FALSE;
+    out->bShowMessage = TRUE;
     out->counter = 0;
     out->thresholdTime = 10000;
     out->threshold = 3;
@@ -10040,8 +10042,12 @@ void GetCrashCounterSettings(CrashCounterSettings* out)
     if (out->bDisabled != FALSE && out->bDisabled != TRUE) out->bDisabled = FALSE;
 
     dwTCSize = sizeof(DWORD);
+    RegGetValueW(HKEY_CURRENT_USER, _T(REGPATH), L"CrashCounterShowMessage", RRF_RT_DWORD, NULL, &out->bShowMessage, &dwTCSize);
+    if (out->bShowMessage != FALSE && out->bShowMessage != TRUE) out->bShowMessage = FALSE;
+
+    dwTCSize = sizeof(DWORD);
     RegGetValueW(HKEY_CURRENT_USER, _T(REGPATH), L"CrashCounter", RRF_RT_DWORD, NULL, &out->counter, &dwTCSize);
-    if (out->counter < 0) out->counter = 0;
+    // if (out->counter < 0) out->counter = 0;
 
     dwTCSize = sizeof(DWORD);
     RegGetValueW(HKEY_CURRENT_USER, _T(REGPATH), L"CrashThresholdTime", RRF_RT_DWORD, NULL, &out->thresholdTime, &dwTCSize);
@@ -10223,9 +10229,9 @@ DWORD InformUserAboutCrash(LPVOID unused)
     return 0;
 }
 
-DWORD WINAPI ClearCrashCounter(INT64 timeout)
+DWORD WINAPI ClearCrashCounter(void* timeout)
 {
-    Sleep(timeout);
+    Sleep((DWORD)(UINT_PTR)timeout);
     DWORD zero = 0;
     RegSetKeyValueW(HKEY_CURRENT_USER, _T(REGPATH), L"CrashCounter", REG_DWORD, &zero, sizeof(DWORD));
     return 0;
@@ -10238,17 +10244,20 @@ BOOL CrashCounterHandleEntryPoint()
     if (!cfg.bDisabled)
     {
         // Ctrl + Shift + Alt
-        BOOL bKeyCombinationTriggered = GetAsyncKeyState(VK_CONTROL) & 0x8000 && GetAsyncKeyState(VK_SHIFT) & 0x8000 && GetAsyncKeyState(VK_MENU) & 0x8000;
-        if (cfg.counter >= cfg.threshold || bKeyCombinationTriggered)
+        if (cfg.counter >= cfg.threshold
+            || (GetAsyncKeyState(VK_CONTROL) & 0x8000 && GetAsyncKeyState(VK_SHIFT) & 0x8000 && GetAsyncKeyState(VK_MENU) & 0x8000))
         {
             cfg.counter = 0;
             RegSetKeyValueW(HKEY_CURRENT_USER, _T(REGPATH), L"CrashCounter", REG_DWORD, &cfg.counter, sizeof(DWORD));
-            SHCreateThread(InformUserAboutCrash, NULL, 0, NULL);
+            if (cfg.bShowMessage)
+            {
+                SHCreateThread(InformUserAboutCrash, NULL, 0, NULL);
+            }
             return TRUE;
         }
         cfg.counter++;
         RegSetKeyValueW(HKEY_CURRENT_USER, _T(REGPATH), L"CrashCounter", REG_DWORD, &cfg.counter, sizeof(DWORD));
-        SHCreateThread(ClearCrashCounter, cfg.thresholdTime, 0, NULL);
+        SHCreateThread(ClearCrashCounter, (void*)(UINT_PTR)cfg.thresholdTime, 0, NULL);
     }
     return FALSE;
 }
@@ -13199,6 +13208,67 @@ bool IsUserOOBEOrCredentialReset()
 {
     return IsUserOOBE() || IsCredentialReset();
 }
+
+PBYTE g_pbExplorerText;
+DWORD g_cbExplorerText;
+
+typedef enum EXPLORERSERVER
+{
+    EXPLORERSERVER_UNKNOWN = 0,
+    EXPLORERSERVER_UNDETERMINED = 1,
+    EXPLORERSERVER_SEPARATE = 2,
+    EXPLORERSERVER_DESKTOP = 3,
+    EXPLORERSERVER_FACTORY = 4,
+    EXPLORERSERVER_NONE = 5,
+    EXPLORERSERVER_CONTROLPANEL = 6,
+} EXPLORERSERVER;
+
+EXPLORERSERVER g_explorerServer;
+
+typedef HRESULT (WINAPI *SetExplorerServerMode_t)(EXPLORERSERVER es);
+SetExplorerServerMode_t explorer_SetExplorerServerModeFunc;
+HRESULT WINAPI explorer_SetExplorerServerModeHook(EXPLORERSERVER es)
+{
+    void* retaddr = _ReturnAddress();
+    if (retaddr >= (void*)g_pbExplorerText && retaddr < (void*)(g_pbExplorerText + g_cbExplorerText))
+    {
+        static BOOL bCalled = FALSE;
+        if (!bCalled)
+        {
+            bCalled = TRUE;
+
+            g_explorerServer = es;
+            if (es != EXPLORERSERVER_DESKTOP)
+            {
+                Inject(FALSE);
+            }
+        }
+    }
+
+    return explorer_SetExplorerServerModeFunc(es);
+}
+
+typedef void (WINAPI *ShellDDEInit_t)(BOOL fInit);
+ShellDDEInit_t explorer_ShellDDEInitFunc;
+void WINAPI explorer_ShellDDEInitHook(BOOL fInit)
+{
+    void* retaddr = _ReturnAddress();
+    if (retaddr >= (void*)g_pbExplorerText && retaddr < (void*)(g_pbExplorerText + g_cbExplorerText) && fInit)
+    {
+        static BOOL bCalled = FALSE;
+        if (!bCalled)
+        {
+            bCalled = TRUE;
+
+            if (g_explorerServer == EXPLORERSERVER_DESKTOP && !CrashCounterHandleEntryPoint())
+            {
+                Inject(TRUE);
+            }
+        }
+    }
+
+    explorer_ShellDDEInitFunc(fInit);
+}
 #endif
 
 #define DLL_INJECTION_METHOD_DXGIDeclareAdapterRemovalSupport 0
@@ -13310,16 +13380,39 @@ HRESULT EntryPoint(DWORD dwMethod)
             IncrementDLLReferenceCount(hModule);
             return E_NOINTERFACE;
         }
-#endif
-        BOOL desktopExists = IsDesktopWindowAlreadyPresent();
-#if WITH_MAIN_PATCHER
-        if (!desktopExists && CrashCounterHandleEntryPoint())
+
+        // Safeguard: only do things when the hooked functions below are called from explorer.exe
+        TextSectionBeginAndSize(GetModuleHandleW(NULL), &g_pbExplorerText, &g_cbExplorerText);
+
+        HMODULE hShell32 = GetModuleHandleW(L"shell32.dll"); // explorer.exe is statically linked to this module
+        explorer_SetExplorerServerModeFunc = (SetExplorerServerMode_t)GetProcAddress(hShell32, MAKEINTRESOURCEA(899));
+        explorer_ShellDDEInitFunc = (ShellDDEInit_t)GetProcAddress(hShell32, MAKEINTRESOURCEA(188));
+        if (explorer_SetExplorerServerModeFunc && explorer_ShellDDEInitFunc)
         {
-            IncrementDLLReferenceCount(hModule);
-            return E_NOINTERFACE;
+            HRESULT hr = SlimDetoursTransactionBegin();
+            if (SUCCEEDED(hr))
+            {
+                // To check which mode is this explorer.exe process running with and run the limited injection routine
+                // for modes other than mode 3/desktop & tray. For example, `explorer.exe /embedding`.
+                hr = SlimDetoursAttach((void**)&explorer_SetExplorerServerModeFunc, explorer_SetExplorerServerModeHook);
+            }
+            if (SUCCEEDED(hr))
+            {
+                // Full injection routine (only for mode 3/desktop & tray) will be run in this function.
+                // This is called after the elevation checks which relaunches explorer if launched as admin with
+                // non-default admin account, so that we don't run our injection if we're going to be relaunched anyway.
+                hr = SlimDetoursAttach((void**)&explorer_ShellDDEInitFunc, explorer_ShellDDEInitHook);
+            }
+            if (SUCCEEDED(hr))
+            {
+                SlimDetoursTransactionCommit();
+            }
+            else
+            {
+                SlimDetoursTransactionAbort();
+            }
         }
 #endif
-        Inject(!desktopExists);
         IncrementDLLReferenceCount(hModule);
     }
     else if (bIsThisStartMEH)

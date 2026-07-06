@@ -405,11 +405,6 @@ Cleanup:
     return fIsRunAsAdmin;
 }
 
-inline BOOL IsDesktopWindowAlreadyPresent()
-{
-    return (FindWindowExW(NULL, NULL, L"Progman", NULL) || FindWindowExW(NULL, NULL, L"Proxy Desktop", NULL));
-}
-
 // https://jiangsheng.net/2013/01/22/how-to-restart-windows-explorer-programmatically-using-restart-manager/
 inline RM_UNIQUE_PROCESS GetExplorerApplication()
 {
