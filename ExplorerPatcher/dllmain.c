@@ -7009,26 +7009,33 @@ void WINAPI Explorer_RefreshUI(int src)
             }
             //SearchboxTaskbarMode
 
-            dwTemp = 0;
-            dwSize = sizeof(DWORD);
-            RegQueryValueExW(
-                hKey,
-                TEXT("Start_ShowClassicMode"),
-                0,
-                NULL,
-                (LPBYTE)&dwTemp,
-                &dwSize
-            );
-            if (dwTemp && !DoesWindows10StartMenuExist())
+            if (IsWindows11())
             {
                 dwTemp = 0;
-            }
-            if (dwTemp != dwStartShowClassicMode)
-            {
-                dwStartShowClassicMode = dwTemp;
+                dwSize = sizeof(DWORD);
+                RegQueryValueExW(
+                    hKey,
+                    TEXT("Start_ShowClassicMode"),
+                    0,
+                    NULL,
+                    (LPBYTE)&dwTemp,
+                    &dwSize
+                );
+                if (dwTemp && !DoesWindows10StartMenuExist())
+                {
+                    dwTemp = 0;
+                }
+                if (dwTemp != dwStartShowClassicMode)
+                {
+                    dwStartShowClassicMode = dwTemp;
 #if WITH_MAIN_PATCHER
-                StartMenuAnimationHidePatch_ApplyOrRevert(dwTemp != 0);
+                    StartMenuAnimationHidePatch_ApplyOrRevert(dwTemp != 0);
 #endif
+                }
+            }
+            else
+            {
+                dwStartShowClassicMode = 1;
             }
 
             RegCloseKey(hKey);
@@ -11774,25 +11781,32 @@ void StartMenu_LoadSettings(BOOL bRestartIfChanged)
     }
     if (hKey)
     {
-        dwVal = 0;
-        dwSize = sizeof(DWORD);
-        RegQueryValueExW(
-            hKey,
-            TEXT("Start_ShowClassicMode"),
-            0,
-            NULL,
-            (LPBYTE)&dwVal,
-            &dwSize
-        );
-        if (dwVal && !DoesWindows10StartMenuExist())
+        if (IsWindows11())
         {
             dwVal = 0;
+            dwSize = sizeof(DWORD);
+            RegQueryValueExW(
+                hKey,
+                TEXT("Start_ShowClassicMode"),
+                0,
+                NULL,
+                (LPBYTE)&dwVal,
+                &dwSize
+            );
+            if (dwVal && !DoesWindows10StartMenuExist())
+            {
+                dwVal = 0;
+            }
+            if (bRestartIfChanged && dwVal != dwStartShowClassicMode)
+            {
+                exit(0);
+            }
+            dwStartShowClassicMode = dwVal;
         }
-        if (bRestartIfChanged && dwVal != dwStartShowClassicMode)
+        else
         {
-            exit(0);
+            dwStartShowClassicMode = 1;
         }
-        dwStartShowClassicMode = dwVal;
 
         dwSize = sizeof(DWORD);
         if (IsWindows11()) dwVal = 1;
