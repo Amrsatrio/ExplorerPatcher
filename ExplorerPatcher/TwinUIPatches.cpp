@@ -3635,7 +3635,9 @@ cleanup:
 
 extern "C" void RunTwinUIPCShellPatches(symbols_addr* symbols_PTRS)
 {
-    HMODULE hTwinuiPcshell = LoadLibraryW(L"twinui.pcshell.dll");
+    HMODULE hTwinuiPcshell = LoadLibraryExW(L"twinui.pcshell.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!hTwinuiPcshell)
+        return;
 
     PBYTE pTwinuiPcshellText;
     DWORD cbTwinuiPcshellText;

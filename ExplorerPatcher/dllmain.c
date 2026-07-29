@@ -10287,22 +10287,6 @@ BOOL CheckExplorerSymbols(symbols_addr* symbols_PTRS)
     return bAllValid;
 }
 
-const WCHAR* GetTaskbarDllChecked(symbols_addr* symbols_PTRS)
-{
-    const WCHAR* pszTaskbarDll = PickTaskbarDll();
-    if (!pszTaskbarDll)
-    {
-        wprintf(L"[TB] Unsupported build\n");
-        return NULL;
-    }
-    if (!CheckExplorerSymbols(symbols_PTRS))
-    {
-        wprintf(L"[TB] Missing offsets\n");
-        return NULL;
-    }
-    return pszTaskbarDll;
-}
-
 // Behavior based on selected Taskbar style:
 // - Windows 11: Load our taskbar DLL with LOAD_LIBRARY_AS_DATAFILE for the old context menu
 // - Windows 10: Skip loading
@@ -10351,10 +10335,19 @@ EP_TASKBAR_FEATURES GetEPTaskbarFeatures()
     return eptf;
 }
 
-HMODULE PrepareAlternateTaskbarImplementation(symbols_addr* symbols_PTRS, const WCHAR* pszTaskbarDll)
+HMODULE PrepareAlternateTaskbarImplementation(symbols_addr* symbols_PTRS, BOOL* pbTaskbarLoadSuccess)
 {
-    if (!symbols_PTRS || !pszTaskbarDll)
+    *pbTaskbarLoadSuccess = FALSE;
+
+    const WCHAR* pszTaskbarDll = PickTaskbarDll();
+    if (!pszTaskbarDll)
     {
+        wprintf(L"[TB] Unsupported build\n");
+        return NULL;
+    }
+    if (!symbols_PTRS || !CheckExplorerSymbols(symbols_PTRS))
+    {
+        wprintf(L"[TB] Missing offsets\n");
         return NULL;
     }
 
@@ -10383,14 +10376,23 @@ HMODULE PrepareAlternateTaskbarImplementation(symbols_addr* symbols_PTRS, const 
         return NULL; // Prevent IAT hooks from being carried out
     }
 
-    typedef DWORD (*GetVersion_t)();
+    typedef DWORD (WINAPI *GetVersion_t)();
     GetVersion_t GetVersion = (GetVersion_t)GetProcAddress(hMyTaskbar, "GetVersion");
     DWORD version = GetVersion ? GetVersion() : 0;
-    if (version != 2)
+    if (version != 3)
     {
         wprintf(L"[TB] '%s' with version %d is not compatible\n", pszTaskbarDll, version);
         FreeLibrary(hMyTaskbar);
         return NULL;
+    }
+
+    typedef DWORD (WINAPI *EP_Taskbar_Initialize_t)();
+    EP_Taskbar_Initialize_t pfnTaskbarInitialize = (EP_Taskbar_Initialize_t)GetProcAddress(hMyTaskbar, "EP_Taskbar_Initialize");
+    HRESULT hrTaskbarInitialize = pfnTaskbarInitialize ? pfnTaskbarInitialize() : HRESULT_FROM_WIN32(GetLastError());
+    if (FAILED(hrTaskbarInitialize))
+    {
+        eptf &= ~EPTF_Taskbar; // Still allow other features (if any) to be loaded
+        wprintf(L"[TB] EP_Taskbar_Initialize() failed with HRESULT 0x%08X\n", hrTaskbarInitialize);
     }
 
     if ((eptf & EPTF_Taskbar) != 0)
@@ -10401,20 +10403,27 @@ HMODULE PrepareAlternateTaskbarImplementation(symbols_addr* symbols_PTRS, const 
             if (IsWindows11())
             {
                 explorer_TrayUI_CreateInstanceFunc = pfnMyTrayUICreateInstance;
-            }
-            else if (explorer_TrayUI_CreateInstanceFunc)
-            {
-                funchook_prepare(
-                    funchook,
-                    (void**)&explorer_TrayUI_CreateInstanceFunc,
-                    pfnMyTrayUICreateInstance
-                );
+                *pbTaskbarLoadSuccess = TRUE;
             }
             else
             {
-                printf("[TB] Failed to hook TrayUI_CreateInstance()\n");
-                FreeLibrary(hMyTaskbar);
-                return NULL;
+                int rv = -1;
+                if (explorer_TrayUI_CreateInstanceFunc)
+                {
+                    rv = funchook_prepare(
+                        funchook,
+                        (void**)&explorer_TrayUI_CreateInstanceFunc,
+                        pfnMyTrayUICreateInstance
+                    );
+                }
+                if (rv == 0)
+                {
+                    *pbTaskbarLoadSuccess = TRUE;
+                }
+                else
+                {
+                    printf("[TB] Failed to hook TrayUI_CreateInstance()\n");
+                }
             }
         }
     }
@@ -10425,6 +10434,10 @@ HMODULE PrepareAlternateTaskbarImplementation(symbols_addr* symbols_PTRS, const 
         EP_Launcher_PatchTwinUIPCShell_t pfnEP_Launcher_PatchTwinUIPCShell = (EP_Launcher_PatchTwinUIPCShell_t)GetProcAddress(hMyTaskbar, "EP_Launcher_PatchTwinUIPCShell");
         if (pfnEP_Launcher_PatchTwinUIPCShell)
         {
+            if (!GetModuleHandleW(L"twinui.pcshell.dll"))
+            {
+                LoadLibraryExW(L"twinui.pcshell.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+            }
             HRESULT hr = pfnEP_Launcher_PatchTwinUIPCShell();
             if (FAILED(hr))
             {
@@ -10439,6 +10452,10 @@ HMODULE PrepareAlternateTaskbarImplementation(symbols_addr* symbols_PTRS, const 
         EP_AudioFlyout_PatchTwinUI_t pfnEP_AudioFlyout_PatchTwinUI = (EP_AudioFlyout_PatchTwinUI_t)GetProcAddress(hMyTaskbar, "EP_AudioFlyout_PatchTwinUI");
         if (pfnEP_AudioFlyout_PatchTwinUI)
         {
+            if (!GetModuleHandleW(L"twinui.pcshell.dll"))
+            {
+                LoadLibraryExW(L"twinui.pcshell.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+            }
             HRESULT hr = pfnEP_AudioFlyout_PatchTwinUI();
             if (FAILED(hr))
             {
@@ -10447,14 +10464,14 @@ HMODULE PrepareAlternateTaskbarImplementation(symbols_addr* symbols_PTRS, const 
         }
     }
 
-    typedef void (*CopyExplorerSymbols_t)(symbols_addr* symbols);
+    typedef void (WINAPI *CopyExplorerSymbols_t)(symbols_addr* symbols);
     CopyExplorerSymbols_t CopyExplorerSymbols = (CopyExplorerSymbols_t)GetProcAddress(hMyTaskbar, "CopyExplorerSymbols");
     if (CopyExplorerSymbols)
     {
         CopyExplorerSymbols(symbols_PTRS);
     }
 
-    typedef void (*SetImmersiveMenuFunctions_t)(void* a, void* b, void* c);
+    typedef void (WINAPI *SetImmersiveMenuFunctions_t)(void* a, void* b, void* c);
     SetImmersiveMenuFunctions_t SetImmersiveMenuFunctions = (SetImmersiveMenuFunctions_t)GetProcAddress(hMyTaskbar, "SetImmersiveMenuFunctions");
     if (SetImmersiveMenuFunctions)
     {
@@ -10949,8 +10966,88 @@ DWORD Inject(BOOL bIsExplorer)
         TryToFindExplorerOffsets(hExplorer, pExplorerText, cbExplorerText, symbols_PTRS.explorer_PTRS);
     }
 
-    const WCHAR* pszTaskbarDll = GetTaskbarDllChecked(&symbols_PTRS);
-    if (bOldTaskbar >= 2 && !pszTaskbarDll)
+    if (IsStockWindows10TaskbarAvailable())
+    {
+        if (IsWindows11())
+        {
+            // Find pointers to various stuff needed to have a working Windows 10 taskbar and Windows 10 taskbar context menu on Windows 11 taskbar
+            // - Classic context menu for Windows 11 taskbar (bOldTaskbar == 0) needs a pointer to ITrayUIHost
+            // - Enabling stock Windows 10 taskbar on Windows 11 21H2-23H2 (bOldTaskbar == 1) requires a pointer to TrayUI_CreateInstance()
+            // Otherwise not needed if we're using ep_taskbar (bOldTaskbar >= 2)
+            if (bOldTaskbar == 0 || bOldTaskbar == 1)
+            {
+#if defined(_M_X64)
+                // 4C 8D 05 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B
+                //                               ^^^^^^^^^^^    ^^^^^^^^^^^
+                // Ref: CTray::Init()
+                PBYTE match = FindPattern(
+                    pExplorerText,
+                    cbExplorerText,
+                    "\x4C\x8D\x05\x00\x00\x00\x00\x48\x8D\x0D\x00\x00\x00\x00\xE8\x00\x00\x00\x00\x48\x8B",
+                    "xxx????xxx????x????xx"
+                );
+                if (match)
+                {
+                    match += 7; // Point to 48
+                    g_pTrayUIHost = (ITrayUIHost*)(match + 7 + *(int*)(match + 3));
+                    match += 7; // Point to E8
+                    explorer_TrayUI_CreateInstanceFunc = (TrayUI_CreateInstance_t)(match + 5 + *(int*)(match + 1));
+                }
+#elif defined(_M_ARM64)
+                // TODO Add support for ARM64
+#endif
+            }
+        }
+        else
+        {
+            // Only need TrayUI_CreateInstance() when we're using ep_taskbar
+            if (bOldTaskbar >= 2)
+            {
+#if defined(_M_X64)
+                // 4C 8D 05 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 85 C0
+                //                               ^^^^^^^^^^^    ^^^^^^^^^^^
+                // Ref: CTray::Init()
+                PBYTE match = FindPattern(
+                    pExplorerText,
+                    cbExplorerText,
+                    "\x4C\x8D\x05\x00\x00\x00\x00\x48\x8D\x0D\x00\x00\x00\x00\xE8\x00\x00\x00\x00\x85\xC0",
+                    "xxx????xxx????x????xx"
+                );
+                if (!match)
+                {
+                    // 20348 (Iron; Server 2022)
+                    // 4C 8D 05 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B
+                    //                                              ^^^^^^^^^^^
+                    match = FindPattern(
+                        pExplorerText,
+                        cbExplorerText,
+                        "\x4C\x8D\x05\x00\x00\x00\x00\x48\x8D\x0D\x00\x00\x00\x00\xE8\x00\x00\x00\x00\x48\x8B",
+                        "xxx????xxx????x????xx"
+                    );
+                }
+                if (match)
+                {
+                    match += 7; // Point to 48
+                    g_pTrayUIHost = (ITrayUIHost*)(match + 7 + *(int*)(match + 3));
+                    match += 7; // Point to E8
+                    explorer_TrayUI_CreateInstanceFunc = (TrayUI_CreateInstance_t)(match + 5 + *(int*)(match + 1));
+                }
+#endif
+            }
+        }
+        if (g_pTrayUIHost)
+        {
+            printf("ITrayUIHost = %llX\n", (PBYTE)g_pTrayUIHost - (PBYTE)hExplorer);
+        }
+        if (explorer_TrayUI_CreateInstanceFunc)
+        {
+            printf("explorer.exe!TrayUI_CreateInstance() = %llX\n", (PBYTE)explorer_TrayUI_CreateInstanceFunc - (PBYTE)hExplorer);
+        }
+    }
+
+    BOOL bTaskbarLoadSuccess;
+    HMODULE hMyTaskbar = PrepareAlternateTaskbarImplementation(&symbols_PTRS, &bTaskbarLoadSuccess);
+    if (bOldTaskbar >= 2 && (!hMyTaskbar || !bTaskbarLoadSuccess))
     {
         bOldTaskbar = 1;
         AdjustTaskbarStyleValue(&bOldTaskbar);
@@ -11033,71 +11130,6 @@ DWORD Inject(BOOL bIsExplorer)
             VnPatchIAT(hExplorer, "api-ms-win-shcore-thread-l1-1-0.dll", "SHCreateThread", explorer_SHCreateThread);
         }
     }
-    if (IsWindows11())
-    {
-        // Find pointers to various stuff needed to have a working Windows 10 taskbar and Windows 10 taskbar context menu on Windows 11 taskbar
-#if defined(_M_X64)
-        // 4C 8D 05 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B
-        //                               ^^^^^^^^^^^    ^^^^^^^^^^^
-        // Ref: CTray::Init()
-        PBYTE match = FindPattern(
-            pExplorerText,
-            cbExplorerText,
-            "\x4C\x8D\x05\x00\x00\x00\x00\x48\x8D\x0D\x00\x00\x00\x00\xE8\x00\x00\x00\x00\x48\x8B",
-            "xxx????xxx????x????xx"
-        );
-        if (match)
-        {
-            match += 7; // Point to 48
-            g_pTrayUIHost = (ITrayUIHost*)(match + 7 + *(int*)(match + 3));
-            match += 7; // Point to E8
-            explorer_TrayUI_CreateInstanceFunc = (TrayUI_CreateInstance_t)(match + 5 + *(int*)(match + 1));
-        }
-#elif defined(_M_ARM64)
-        // TODO Add support for ARM64
-#endif
-    }
-    else
-    {
-#if defined(_M_X64)
-        // 4C 8D 05 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 85 C0
-        //                               ^^^^^^^^^^^    ^^^^^^^^^^^
-        // Ref: CTray::Init()
-        PBYTE match = FindPattern(
-            pExplorerText,
-            cbExplorerText,
-            "\x4C\x8D\x05\x00\x00\x00\x00\x48\x8D\x0D\x00\x00\x00\x00\xE8\x00\x00\x00\x00\x85\xC0",
-            "xxx????xxx????x????xx"
-        );
-        if (!match)
-        {
-            // 20348 (Iron; Server 2022)
-            // 4C 8D 05 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B
-            //                                              ^^^^^^^^^^^
-            match = FindPattern(
-                pExplorerText,
-                cbExplorerText,
-                "\x4C\x8D\x05\x00\x00\x00\x00\x48\x8D\x0D\x00\x00\x00\x00\xE8\x00\x00\x00\x00\x48\x8B",
-                "xxx????xxx????x????xx"
-            );
-        }
-        if (match)
-        {
-            match += 7; // Point to 48
-            g_pTrayUIHost = (ITrayUIHost*)(match + 7 + *(int*)(match + 3));
-            match += 7; // Point to E8
-            explorer_TrayUI_CreateInstanceFunc = (TrayUI_CreateInstance_t)(match + 5 + *(int*)(match + 1));
-        }
-#endif
-    }
-    if (g_pTrayUIHost)
-    {
-        printf("ITrayUIHost = %llX\n", (PBYTE)g_pTrayUIHost - (PBYTE)hExplorer);
-    }
-    if (explorer_TrayUI_CreateInstanceFunc)
-    {
-        printf("explorer.exe!TrayUI_CreateInstance() = %llX\n", (PBYTE)explorer_TrayUI_CreateInstanceFunc - (PBYTE)hExplorer);
-    }
 
     // Enable Windows 10 taskbar search box on 22621+
     if (IsWindows11Version22H2OrHigher())
@@ -11167,7 +11199,6 @@ DWORD Inject(BOOL bIsExplorer)
 
     RunTwinUIPCShellPatches(&symbols_PTRS);
 
-    HMODULE hMyTaskbar = PrepareAlternateTaskbarImplementation(&symbols_PTRS, pszTaskbarDll);
     if (hMyTaskbar)
     {
         VnPatchIAT(hMyTaskbar, "user32.dll", "DeleteMenu", explorer_DeleteMenu);
