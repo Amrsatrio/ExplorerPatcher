@@ -1225,14 +1225,15 @@ HRESULT PatchUnifiedTilePinUnpinProvider(HMODULE hModule)
     }
     else
     {
-        // E4 8A 40 A9 E3 03 ?? AA E1 03 ?? AA E0 03 ?? AA ?? ?? ?? ?? ?? ?? ?? F9 E3 03 00 2A // BR
+        // E4 8A 40 A9 E3 03 ?? AA E1 03 ?? AA E0 03 ?? AA ?? ?? ?? ?? // BR
         //                                                 ^^^^^^^^^^^
         // Ref: WindowsInternal::Shell::UnifiedTile::Private::UnifiedTilePinUnpinVerbProvider::GetVerbs()
-        match = (PBYTE)FindPattern_4_(
+        match = (PBYTE)FindPatternBitMask_4_(
             pText,
             cbText,
-            "\xE4\x8A\x40\xA9\xE3\x03\x00\xAA\xE1\x03\x00\xAA\xE0\x03\x00\xAA\x00\x00\x00\x00\x00\x00\x00\xF9\xE3\x03\x00\x2A",
-            "xxxxxx?xxx?xxx?x???????xxxxx"
+            "\xE4\x8A\x40\xA9\xE3\x03\x00\xAA\xE1\x03\x00\xAA\xE0\x03\x00\xAA\x00\x00\x00\x94",
+            "\xFF\xFF\xFF\xFF\xFF\xFF\x00\xFF\xFF\xFF\x00\xFF\xFF\xFF\x00\xFF\x00\x00\x00\xFC",
+            20
         );
         if (match)
         {
@@ -1260,107 +1261,6 @@ HRESULT PatchUnifiedTilePinUnpinProvider(HMODULE hModule)
 
     return S_OK;
 }
-
-#define FIND_PATTERN_WITH_GAP(pFile, dwSize, pat1, msk1, siz1, gap1and2, pat2, msk2, siz2, postprocess, dest) \
-	do \
-	{ \
-		PBYTE pCurrent = (pFile); \
-		while (pCurrent + (siz1) + (gap1and2) + (siz2) < (pFile) + (dwSize)) \
-		{ \
-			PBYTE matchLocal = (PBYTE)FindPattern( \
-				pCurrent, \
-				(SIZE_T)(dwSize) - (SIZE_T)(pCurrent - (SIZE_T)(pFile)), \
-				(pat1), \
-				(msk1) \
-			); \
-			if (!matchLocal) \
-			{ \
-				break; /* We tried our best, but we found nothing... */ \
-			} \
- 			\
-			/* Possible match, shift to continuation search start */ \
-			pCurrent = matchLocal + (siz1); \
- 			\
-			if (!(pCurrent + (gap1and2) + (siz2) < (pFile) + (dwSize))) \
-			{ \
-				break; /* Not enough space for continuation */ \
-			} \
- 			\
-			/* Check continuation */ \
-			PBYTE matchContinuationTest = (PBYTE)FindPattern( \
-				pCurrent, \
-				(gap1and2) + (siz2), \
-				(pat2), \
-				(msk2) \
-			); \
-			if (!matchContinuationTest) \
-			{ \
-				continue; /* Not this one, continue at first pattern + pattern size */ \
-			} \
- 			\
-			matchLocal = (postprocess)(matchLocal); \
-			if (!matchLocal) \
-			{ \
-				continue; /* Not this one, continue at first pattern + pattern size */ \
-			} \
- 			\
-			*(dest) = matchLocal; \
-			break; /* Got it! */ \
-		} \
-	} \
-	while (false)
-
-// ALL pointers and sizes must be multiples of 4
-#define FIND_PATTERN_WITH_GAP_ARM(pFile, dwSize, pat1, msk1, siz1, gap1and2, pat2, msk2, siz2, postprocess, dest) \
-	do \
-	{ \
-		PBYTE pCurrent = (pFile); \
-		while (pCurrent + (siz1) + (gap1and2) + (siz2) < (pFile) + (dwSize)) \
-		{ \
-			PBYTE matchLocal = (PBYTE)FindPatternBitMask_4_( \
-				pCurrent, \
-				(SIZE_T)(dwSize) - (SIZE_T)(pCurrent - (SIZE_T)(pFile)), \
-				(pat1), \
-				(msk1), \
-				(siz1) \
-			); \
-			if (!matchLocal) \
-			{ \
-				break; /* We tried our best, but we found nothing... */ \
-			} \
- 			\
-			/* Possible match, shift to continuation search start */ \
-			pCurrent = matchLocal + (siz1); \
- 			\
-			if (!(pCurrent + (gap1and2) + (siz2) < (pFile) + (dwSize))) \
-			{ \
-				break; /* Not enough space for continuation */ \
-			} \
- 			\
-			/* Check continuation */ \
-			PBYTE matchContinuationTest = (PBYTE)FindPatternBitMask_4_( \
-				pCurrent, \
-				(gap1and2) + (siz2), \
-				(pat2), \
-				(msk2), \
-				(siz2) \
-			); \
-			if (!matchContinuationTest) \
-			{ \
-				continue; /* Not this one, continue at first pattern + pattern size */ \
-			} \
- 			\
-			matchLocal = (postprocess)(matchLocal); \
-			if (!matchLocal) \
-			{ \
-				continue; /* Not this one, continue at first pattern + pattern size */ \
-			} \
- 			\
-			*(dest) = matchLocal; \
-			break; /* Got it! */ \
-		} \
-	} \
-	while (false)
 
 void* g_ctc_MakeAndInitialize_CDSStartCollectionWriter_Func;
 void* g_ctc_CreateLayoutInitializationLayoutRoot_Func;
@@ -1436,13 +1336,13 @@ HRESULT BringBackSharedStartLayoutInCuratedTileCollections(HMODULE hModule)
     }
 #elif defined(_M_ARM64)
     // - GetCDSStartCollectionWriter() non-inlined (26100 ~)
-    // E1 03 13 AA ?? ?? ?? ?? F4 03 00 2A E0 03 13 AA
+    // E1 03 ?? AA ?? ?? ?? ?? ?? 03 00 2A E0 03 ?? AA ?? ?? ?? ?? E0 03 ?? AA FF 83 00 91
     //             ^^^^^^^^^^^
     // Ref: ctc::GetCDSStartCollectionWriter()
     matchMakeAndInitialize_CDSStartCollectionWriter = (PBYTE)FindPattern_4_(
         pText, cbText,
-        "\xE1\x03\x13\xAA\x00\x00\x00\x00\xF4\x03\x00\x2A\xE0\x03\x13\xAA",
-        "xxxx????xxxxxxxx"
+        "\xE1\x03\x00\xAA\x00\x00\x00\x00\x00\x03\x00\x2A\xE0\x03\x00\xAA\x00\x00\x00\x00\xE0\x03\x00\x2A\xFF\x83\x00\x91",
+        "xx?x?????xxxxx?x????xx?xxxxx"
     );
     if (matchMakeAndInitialize_CDSStartCollectionWriter)
     {
@@ -1477,10 +1377,17 @@ HRESULT BringBackSharedStartLayoutInCuratedTileCollections(HMODULE hModule)
             "\x1F\xFC\xFF\xFF\xFF\xFF\xFF\xFF",
             8,
 
-            [&](PBYTE matchCandidate) -> PBYTE
+            [&](PBYTE matchCandidate, PBYTE matchSecond) -> PBYTE
             {
-                matchCandidate += 4;
-                return (PBYTE)ARM64_FollowBL((DWORD*)matchCandidate);
+                // Sanity check: first 8 bytes of the gap should have a function call which is the std::wstring destructor
+                PBYTE gapStart = matchCandidate + 12;
+                PBYTE mustBeFound = (PBYTE)FindPatternBitMask_4_(
+                    gapStart, std::min<size_t>(8, (size_t)(matchSecond - gapStart)) + 4 /*this test pattern*/,
+                    "\x00\x00\x00\x94",
+                    "\x00\x00\x00\xFC",
+                    4
+                );
+                return mustBeFound ? (PBYTE)ARM64_FollowBL((DWORD*)(matchCandidate + 4)) : nullptr;
             },
 
             &matchMakeAndInitialize_CDSStartCollectionWriter
@@ -1560,6 +1467,8 @@ HRESULT BringBackSharedStartLayoutInCuratedTileCollections(HMODULE hModule)
     PBYTE matchMakeShared_LayoutRootInternal = nullptr;
     bool bIsInlined_MakeShared_LayoutRootInternal = false;
     PBYTE matchLayoutRootInternal_CtorWithTransformerRoot = nullptr;
+    PBYTE matchMakeShared_LayoutRootInternal_ADRP = nullptr;
+    PBYTE matchMakeShared_LayoutRootInternal_ADD = nullptr;
 #if defined(_M_X64)
     // 16299 ~
     // E8 ?? ?? ?? ?? 48 8B D0 ?? 8D ?? 10 E8 ?? ?? ?? ?? 48 8B ?? 24
@@ -1585,7 +1494,7 @@ HRESULT BringBackSharedStartLayoutInCuratedTileCollections(HMODULE hModule)
         "xxxxxx????xxx?x",
         15,
 
-        [&](PBYTE matchCandidate) -> PBYTE
+        [&](PBYTE matchCandidate, PBYTE) -> PBYTE
         {
             matchCandidate -= 5;
             if (matchCandidate >= pText && *matchCandidate == 0xE8)
@@ -1601,13 +1510,13 @@ HRESULT BringBackSharedStartLayoutInCuratedTileCollections(HMODULE hModule)
         &matchMakeShared_LayoutRootInternal
     );
 #elif defined(_M_ARM64)
-    // ?? 82 00 91 ?? ?? ?? ?? E1 03 00 AA ?? 42 00 91
+    // ?? 82 00 91 ?? ?? ?? ?? E1 03 00 AA ?? 42 00 91 ?? ?? ?? ?? A0 2B 40 F9
     //             ^^^^^^^^^^^
     // Ref: ctc::PreserveLayoutPostProcessor::RuntimeClassInitialize()
     matchMakeShared_LayoutRootInternal = (PBYTE)FindPattern_4_(
         pText + 1, cbText - 1,
-        "\x82\x00\x91\x00\x00\x00\x00\xE1\x03\x00\xAA\x00\x42\x00\x91",
-        "xxx????xxxx?xxx"
+        "\x82\x00\x91\x00\x00\x00\x00\xE1\x03\x00\xAA\x00\x42\x00\x91\x00\x00\x00\x00\xA0\x2B\x40\xF9",
+        "xxx????xxxx?xxx????xxxx"
     );
     if (matchMakeShared_LayoutRootInternal)
     {
@@ -1617,29 +1526,74 @@ HRESULT BringBackSharedStartLayoutInCuratedTileCollections(HMODULE hModule)
     else
     {
         // Note: 26100+ make_shared is inlined here
-        // 00 2E 80 D2 ?? ?? ?? ?? F3 03 00 AA B3 0B 00 F9 ?? ?? ?? ?? ?? ?? ?? ?? E9 03 00 B2 A2 83 01 91 68 26 00 A9
-        //                                                 ^^^^^^^^^^^^^^^^^^^^^^^ std::_Ref_count_obj2 vtbl
-        // A7 ?? C0 ?? ?? 82 00 91 60 42 00 91 BF 7F ?? A9 A7 1B 80 3D ?? ?? ?? ?? 1F 20 03 D5 68 42 00 91 A1 43 00 91
-        //                                                             ^^^^^^^^^^^ Ctor
-        // A8 4F 01 A9 ?? 42 00 91 ?? ?? ?? ?? A0 0F 40 F9
-        //
-        matchMakeShared_LayoutRootInternal = (PBYTE)FindPattern_4_(
+
+        // First:
+        //   P: 00 2E 80 D2 00 00 00 94 E0 03 00 AA A0 0B 00 F9
+        //   M: FF FF FF FF 00 00 00 FC E0 FF FF FF E0 FF FF FF
+        //   ORR X??, XZR, X0 (MOV X??, X0)
+        //     26100.1: 0b10101010_00_0_00000_000000_11111_10011
+        //     P:       0b10101010_00_0_00000_000000_11111_00000 = AA0003E0 = E0 03 00 AA
+        //     M:       0b11111111_11_1_11111_111111_11111_00000 = FFFFFFE0 = E0 FF FF FF
+        //   STR X??, [X29, #0x10]
+        //     26100.1: 0b1111100100_000000000010_11101_10011
+        //     P:       0b1111100100_000000000010_11101_00000 = F9000BA0 = A0 0B 00 F9
+        //     M:       0b1111111111_111111111111_11111_00000 = FFFFFFE0 = E0 FF FF FF
+        // Gap:
+        //   Max 60 bytes
+        // Second:
+        //   P: 00 40 00 91 00 00 00 94 A0 0F 40 F9 60 00 00 B4 00 00 00 94 1F 20 03 D5 A0 00 40 F9 40 00 00 B4 00 00 00 94 A0 A3 00 91
+        //   M: 1F FC FF FF 00 00 00 FC FF FF FF FF FF FF FF FF 00 00 00 FC FF FF FF FF FF 00 FF FF FF FF FF FF 00 00 00 FC FF FF FF FF
+        //   ADD X0, X??, #0x10: 00 40 00 91 / 1F FC FF FF
+        PBYTE matchMakeShared_LayoutRootInternal_BL = nullptr;
+        FIND_PATTERN_WITH_GAP_ARM(
             pText, cbText,
-            "\x00\x2E\x80\xD2\x00\x00\x00\x00\xF3\x03\x00\xAA\xB3\x0B\x00\xF9\x00\x00\x00\x00\x00\x00\x00\x00\xE9\x03\x00\xB2\xA2\x83\x01\x91\x68\x26\x00\xA9\xA7\x00\xC0\x00\x00\x82\x00\x91\x60\x42\x00\x91\xBF\x7F\x00\xA9\xA7\x1B\x80\x3D\x00\x00\x00\x00\x1F\x20\x03\xD5\x68\x42\x00\x91\xA1\x43\x00\x91\xA8\x4F\x01\xA9\x00\x42\x00\x91\x00\x00\x00\x00\xA0\x0F\x40\xF9",
-            "xxxx????xxxxxxxx????????xxxxxxxxxxxxx?x??xxxxxxxxx?xxxxx????xxxxxxxxxxxxxxxx?xxx????xxxx"
+
+            "\x00\x2E\x80\xD2\x00\x00\x00\x94\xE0\x03\x00\xAA\xA0\x0B\x00\xF9",
+            "\xFF\xFF\xFF\xFF\x00\x00\x00\xFC\xE0\xFF\xFF\xFF\xE0\xFF\xFF\xFF",
+            16,
+
+            60,
+
+            "\x00\x40\x00\x91\x00\x00\x00\x94\xA0\x0F\x40\xF9\x60\x00\x00\xB4\x00\x00\x00\x94\x1F\x20\x03\xD5\xA0\x00\x40\xF9\x40\x00\x00\xB4\x00\x00\x00\x94\xA0\xA3\x00\x91",
+            "\x1F\xFC\xFF\xFF\x00\x00\x00\xFC\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x00\x00\x00\xFC\xFF\xFF\xFF\xFF\xFF\x00\xFF\xFF\xFF\xFF\xFF\xFF\x00\x00\x00\xFC\xFF\xFF\xFF\xFF",
+            40,
+
+            [&](PBYTE matchCandidate, PBYTE) -> PBYTE
+            {
+                // ADRP, ADD, and BL must be at +16/+20/+56 or +20/+24/+60, respectively
+                if (ARM64_IsADRP(*(DWORD*)(matchCandidate + 16)) && ARM64_IsADDIMM(*(DWORD*)(matchCandidate + 20)) && ARM64_IsBL(*(DWORD*)(matchCandidate + 56)))
+                {
+                    matchMakeShared_LayoutRootInternal_ADRP = matchCandidate + 16;
+                    matchMakeShared_LayoutRootInternal_ADD = matchCandidate + 20;
+                    matchMakeShared_LayoutRootInternal_BL = matchCandidate + 56;
+                    return matchCandidate;
+                }
+                else if (ARM64_IsADRP(*(DWORD*)(matchCandidate + 20)) && ARM64_IsADDIMM(*(DWORD*)(matchCandidate + 24)) && ARM64_IsBL(*(DWORD*)(matchCandidate + 60)))
+                {
+                    matchMakeShared_LayoutRootInternal_ADRP = matchCandidate + 20;
+                    matchMakeShared_LayoutRootInternal_ADD = matchCandidate + 24;
+                    matchMakeShared_LayoutRootInternal_BL = matchCandidate + 60;
+                    return matchCandidate;
+                }
+                else
+                {
+                    return nullptr;
+                }
+            },
+
+            &matchMakeShared_LayoutRootInternal
         );
         if (matchMakeShared_LayoutRootInternal)
         {
             bIsInlined_MakeShared_LayoutRootInternal = true;
 
-            matchLayoutRootInternal_CtorWithTransformerRoot = matchMakeShared_LayoutRootInternal + 56;
-            matchLayoutRootInternal_CtorWithTransformerRoot = (PBYTE)ARM64_FollowBL((DWORD*)matchLayoutRootInternal_CtorWithTransformerRoot);
+            matchLayoutRootInternal_CtorWithTransformerRoot = (PBYTE)ARM64_FollowBL((DWORD*)matchMakeShared_LayoutRootInternal_BL);
             if (!matchLayoutRootInternal_CtorWithTransformerRoot)
             {
                 matchMakeShared_LayoutRootInternal = nullptr;
             }
 
-            g_LayoutRootInternal_CtorWithTransformerRoot_expectedReturnAddress = matchMakeShared_LayoutRootInternal + 60;
+            g_LayoutRootInternal_CtorWithTransformerRoot_expectedReturnAddress = matchMakeShared_LayoutRootInternal_BL + 4;
         }
     }
 #endif
@@ -1672,7 +1626,7 @@ HRESULT BringBackSharedStartLayoutInCuratedTileCollections(HMODULE hModule)
         "xxxxxxxxxxx",
         11,
 
-        [&](PBYTE matchCandidate) -> PBYTE
+        [&](PBYTE matchCandidate, PBYTE) -> PBYTE
         {
             matchCandidate += 12;
             return matchCandidate + 5 + *(int*)(matchCandidate + 1);
@@ -1713,24 +1667,32 @@ HRESULT BringBackSharedStartLayoutInCuratedTileCollections(HMODULE hModule)
 #elif defined(_M_ARM64)
     // A1 83 00 91 A0 A3 00 91 A8 13 00 F9 ?? ?? ?? ?? ... (max 16, 21 including masks) ?? 00 80 52
     //                                     ^^^^^^^^^^^
-    // Ref: ctc::PreserveLayoutPostProcessor::RuntimeClassInitialize()
-    FIND_PATTERN_WITH_GAP(
+    // MOV W??, #2
+    //   29634.1000: 0b010100101_00_0000000000000010_01000
+    //   P:          0b010100101_00_0000000000000010_00000 = 52800040 = 40 00 80 52
+    //   M:          0b111111111_11_1111111111111111_00000 = FFFFFFE0 = E0 FF FF FF
+    // Ref: ctc::AppendWin8UpgradeTilesPolicy::GetPostProcessors()
+    FIND_PATTERN_WITH_GAP_ARM(
         pText, cbText,
 
-        "\xA1\x83\x00\x91\xA0\xA3\x00\x91\xA8\x13\x00\xF9",
-        "xxxxxxxxxxxx",
-        12,
+        "\xA1\x83\x00\x91\xA0\xA3\x00\x91",
+        "\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF",
+        8,
 
-        21,
+        24,
 
-        "\x00\x80\x52",
-        "xxx",
-        3,
+        "\x40\x00\x80\x52",
+        "\xE0\xFF\xFF\xFF",
+        4,
 
-        [&](PBYTE matchCandidate) -> PBYTE
+        [&](PBYTE matchCandidate, PBYTE) -> PBYTE
         {
-            matchCandidate += 12;
-            return (PBYTE)ARM64_FollowBL((DWORD*)matchCandidate);
+            PBYTE result = (PBYTE)ARM64_FollowBL((DWORD*)(matchCandidate + 8)); // Returns nullptr if not BL
+            if (!result)
+            {
+                result = (PBYTE)ARM64_FollowBL((DWORD*)(matchCandidate + 12));
+            }
+            return result;
         },
 
         &matchMakeAndInitializeOrThrow_Win8LayoutMigrationPostProcessor,
@@ -1954,12 +1916,12 @@ HRESULT BringBackSharedStartLayoutInCuratedTileCollections(HMODULE hModule)
         return E_UNEXPECTED;
 #elif defined(_M_ARM64)
         RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_ARITHMETIC_OVERFLOW), ARM64_DecodeADRLEx(
-            (UINT_PTR)(matchMakeShared_LayoutRootInternal + 16), *(DWORD*)(matchMakeShared_LayoutRootInternal + 16),
-            *(DWORD*)(matchMakeShared_LayoutRootInternal + 20), &rdADRP_MakeShared_LayoutRootInternal,
+            (UINT_PTR)matchMakeShared_LayoutRootInternal_ADRP, *(DWORD*)matchMakeShared_LayoutRootInternal_ADRP,
+            *(DWORD*)matchMakeShared_LayoutRootInternal_ADD, &rdADRP_MakeShared_LayoutRootInternal,
             &rdADD_MakeShared_LayoutRootInternal, &rnADD_MakeShared_LayoutRootInternal) == 0);
         RETURN_HR_IF(E_UNEXPECTED, rdADRP_MakeShared_LayoutRootInternal != rnADD_MakeShared_LayoutRootInternal);
         RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_ARITHMETIC_OVERFLOW), !ARM64_EncodeADRL(
-            (UINT_PTR)(matchMakeShared_LayoutRootInternal + 16), (UINT_PTR)pvtblRefCountObj2LayoutRootInternal,
+            (UINT_PTR)matchMakeShared_LayoutRootInternal_ADRP, (UINT_PTR)pvtblRefCountObj2LayoutRootInternal,
             rdADRP_MakeShared_LayoutRootInternal, rdADD_MakeShared_LayoutRootInternal,
             &insnADRPNew_MakeShared_LayoutRootInternal, &insnADDNew_MakeShared_LayoutRootInternal));
 #endif

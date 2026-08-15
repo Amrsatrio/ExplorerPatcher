@@ -1435,6 +1435,139 @@ FORCEINLINE PVOID FindPatternBitMask_4_(
     return _FindPatternBitMaskHelper_4_(pvSearch, cbSearch, pszPattern, pszMask, cbPattern);
 }
 
+#define FIND_PATTERN_WITH_GAP(pFile, dwSize, pat1, msk1, siz1, gap1and2, pat2, msk2, siz2, postprocess, dest) \
+    do \
+    { \
+        PBYTE pCurrent = (pFile); \
+        while (pCurrent + (siz1) + (gap1and2) + (siz2) < (pFile) + (dwSize)) \
+        { \
+            PBYTE matchLocal = (PBYTE)FindPattern( \
+                pCurrent, \
+                (SIZE_T)(dwSize) - (SIZE_T)(pCurrent - (SIZE_T)(pFile)), \
+                (pat1), \
+                (msk1) \
+            ); \
+            if (!matchLocal) \
+            { \
+                break; /* We tried our best, but we found nothing... */ \
+            } \
+            \
+            /* Possible match, shift to continuation search start */ \
+            pCurrent = matchLocal + (siz1); \
+            \
+            if (!(pCurrent + (gap1and2) + (siz2) < (pFile) + (dwSize))) \
+            { \
+                break; /* Not enough space for continuation */ \
+            } \
+            \
+            /* Check continuation */ \
+            PBYTE matchContinuationTest = (PBYTE)FindPattern( \
+                pCurrent, \
+                (gap1and2) + (siz2), \
+                (pat2), \
+                (msk2) \
+            ); \
+            if (!matchContinuationTest) \
+            { \
+                continue; /* Not this one, continue at first pattern + pattern size */ \
+            } \
+            \
+            matchLocal = (postprocess)(matchLocal, matchContinuationTest); \
+            if (!matchLocal) \
+            { \
+                continue; /* Not this one, continue at first pattern + pattern size */ \
+            } \
+            \
+            *(dest) = matchLocal; \
+            break; /* Got it! */ \
+        } \
+    } \
+    while (0)
+
+// ALL pointers and sizes must be multiples of 4
+#define FIND_PATTERN_WITH_POSTPROCESS_ARM(pFile, dwSize, pat1, msk1, siz1, postprocess, dest) \
+    do \
+    { \
+        PBYTE pCurrent = (pFile); \
+        while (pCurrent + (siz1) < (pFile) + (dwSize)) \
+        { \
+            PBYTE matchLocal = (PBYTE)FindPatternBitMask_4_( \
+                pCurrent, \
+                (SIZE_T)(dwSize) - (SIZE_T)(pCurrent - (SIZE_T)(pFile)), \
+                (pat1), \
+                (msk1), \
+                (siz1) \
+            ); \
+            if (!matchLocal) \
+            { \
+                break; /* We tried our best, but we found nothing... */ \
+            } \
+            \
+            PBYTE matchPostProcessed = (postprocess)(matchLocal); \
+            if (!matchPostProcessed) \
+            { \
+                pCurrent = matchLocal + (siz1); \
+                continue; /* Not this one, continue at first pattern + pattern size */ \
+            } \
+            \
+            *(dest) = matchPostProcessed; \
+            break; /* Got it! */ \
+        } \
+    } \
+    while (0)
+
+// ALL pointers and sizes must be multiples of 4
+#define FIND_PATTERN_WITH_GAP_ARM(pFile, dwSize, pat1, msk1, siz1, gap1and2, pat2, msk2, siz2, postprocess, dest) \
+    do \
+    { \
+        PBYTE pCurrent = (pFile); \
+        while (pCurrent + (siz1) + (gap1and2) + (siz2) < (pFile) + (dwSize)) \
+        { \
+            PBYTE matchLocal = (PBYTE)FindPatternBitMask_4_( \
+                pCurrent, \
+                (SIZE_T)(dwSize) - (SIZE_T)(pCurrent - (SIZE_T)(pFile)), \
+                (pat1), \
+                (msk1), \
+                (siz1) \
+            ); \
+            if (!matchLocal) \
+            { \
+                break; /* We tried our best, but we found nothing... */ \
+            } \
+            \
+            /* Possible match, shift to continuation search start */ \
+            pCurrent = matchLocal + (siz1); \
+            \
+            if (!(pCurrent + (gap1and2) + (siz2) < (pFile) + (dwSize))) \
+            { \
+                break; /* Not enough space for continuation */ \
+            } \
+            \
+            /* Check continuation */ \
+            PBYTE matchContinuationTest = (PBYTE)FindPatternBitMask_4_( \
+                pCurrent, \
+                (gap1and2) + (siz2), \
+                (pat2), \
+                (msk2), \
+                (siz2) \
+            ); \
+            if (!matchContinuationTest) \
+            { \
+                continue; /* Not this one, continue at first pattern + pattern size */ \
+            } \
+            \
+            matchLocal = (postprocess)(matchLocal, matchContinuationTest); \
+            if (!matchLocal) \
+            { \
+                continue; /* Not this one, continue at first pattern + pattern size */ \
+            } \
+            \
+            *(dest) = matchLocal; \
+            break; /* Got it! */ \
+        } \
+    } \
+    while (0)
+
 inline UINT_PTR FileOffsetToRVA(PBYTE pBase, UINT_PTR offset)
 {
     PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pBase;

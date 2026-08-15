@@ -1921,43 +1921,64 @@ BOOL FixStartMenuAnimation(HMODULE hTwinuiPcshell, PBYTE pSearchBegin, size_t cb
         matchVtable += 7 + *(int*)(matchVtable + 3);
     }
 #elif defined(_M_ARM64)
-    // * Pattern for Cobalt and Nickel
+    // * Pattern for 22000, 22621, 25xxx, 26100, 28000
+    //   Find stable anchor (three hardcoded Microsoft::WRL::EventSource offsets):
     //   ```
-    //   69 A2 03 A9 ?? ?? 00 ?? 08 ?? ?? 91 ?? ?? 00 ?? 29 ?? ?? 91 ?? 32 00 F9 60 ?? ?? 91 ?? 26 00 F9 ?? ?? ?? ?? 1F 20 03 D5
-    //               ^^^^^^^^^^^+^^^^^^^^^^^
+    //   P: 00 00 02 91 00 00 00 94 1F 20 03 D5 00 60 02 91 00 00 00 94 1F 20 03 D5 00 C0 02 91
+    //   M: 1F FC FF FF 00 00 00 FC FF FF FF FF 1F FC FF FF 00 00 00 FC FF FF FF FF 1F FC FF FF
+    //   ADD X0, X??, #0x80
+    //     P: 0b10010001_00_000010000000_00000_00000 = 91020000 = 00 00 02 91
+    //     M: 0b11111111_11_111111111111_00000_11111 = FFFFFC1F = 1F FC FF FF
+    //   ADD X0, X??, #0x98
+    //     P: 0b10010001_00_000010011000_00000_00000 = 91026000 = 00 60 02 91
+    //     M: 0b11111111_11_111111111111_00000_11111 = FFFFFC1F = 1F FC FF FF
+    //   ADD X0, X??, #0xB0
+    //     P: 0b10010001_00_000010110000_00000_00000 = 9102C000 = 00 C0 02 91
+    //     M: 0b11111111_11_111111111111_00000_11111 = FFFFFC1F = 1F FC FF FF
     //   ```
+    //   Then walk backwards up to 9 instructions behind to find the ADRL whose value will be passed to this + 0x60.
     // Ref: CStartExperienceManager::CStartExperienceManager()
-    PBYTE matchVtable = (PBYTE)FindPattern_4_(
+    PBYTE matchVtable = nullptr;
+    auto postprocessVtable = [&](PBYTE matchCandidate) -> PBYTE
+    {
+        BYTE regToBeWrittenTo0x60 = 0xFF;
+        PBYTE end = std::min<PBYTE>(pSearchBegin, matchCandidate - 36);
+        matchCandidate -= 4;
+        while (matchCandidate >= end)
+        {
+            DWORD insn = *(DWORD*)matchCandidate;
+            if (regToBeWrittenTo0x60 == 0xFF)
+            {
+                // STR X??, [X??, #0x60]
+                //   P: 0b1111100100_000000001100_00000_00000 = F9003000 = 00 30 00 F9
+                //   M: 0b1111111111_111111111111_00000_00000 = FFFFFC00 = 00 FC FF FF
+                if ((insn & 0xFFFFFC00) == 0xF9003000)
+                {
+                    regToBeWrittenTo0x60 = (BYTE)ARM64_ReadBits(insn, 4, 0); // Rd
+                }
+            }
+            else
+            {
+                BYTE rdADD;
+                PBYTE result = (PBYTE)ARM64_DecodeADRLEx((UINT_PTR)matchCandidate, insn, *(DWORD*)(matchCandidate + 4), nullptr, &rdADD, nullptr);
+                if (result && rdADD == regToBeWrittenTo0x60)
+                {
+                    return result;
+                }
+            }
+            matchCandidate -= 4;
+        }
+        return nullptr;
+    };
+    FIND_PATTERN_WITH_POSTPROCESS_ARM(
         pSearchBegin,
         cbSearch,
-        "\x69\xA2\x03\xA9\x00\x00\x00\x00\x08\x00\x00\x91\x00\x00\x00\x00\x29\x00\x00\x91\x00\x32\x00\xF9\x60\x00\x00\x91\x00\x26\x00\xF9\x00\x00\x00\x00\x1F\x20\x03\xD5",
-        "xxxx??x?x??x??x?x??x?xxxx??x?xxx????xxxx"
+        "\x00\x00\x02\x91\x00\x00\x00\x94\x1F\x20\x03\xD5\x00\x60\x02\x91\x00\x00\x00\x94\x1F\x20\x03\xD5\x00\xC0\x02\x91",
+        "\x1F\xFC\xFF\xFF\x00\x00\x00\xFC\xFF\xFF\xFF\xFF\x1F\xFC\xFF\xFF\x00\x00\x00\xFC\xFF\xFF\xFF\xFF\x1F\xFC\xFF\xFF",
+        28,
+        postprocessVtable,
+        &matchVtable
     );
-    if (matchVtable)
-    {
-        matchVtable += 4;
-        matchVtable = (PBYTE)ARM64_DecodeADRL((UINT_PTR)matchVtable, *(DWORD*)matchVtable, *(DWORD*)(matchVtable + 4));
-    }
-    else
-    {
-        // * Pattern for Germanium
-        //   ```
-        //   ?? 22 04 A9 ?? ?? 00 ?? 08 ?? ?? 91 ?? A2 01 91 ?? 32 00 F9
-        //               ^^^^^^^^^^^+^^^^^^^^^^^
-        //   ```
-        // Ref: CStartExperienceManager::CStartExperienceManager()
-        matchVtable = (PBYTE)FindPattern_4_(
-            pSearchBegin + 1,
-            cbSearch - 1,
-            "\x22\x04\xA9\x00\x00\x00\x00\x08\x00\x00\x91\x00\xA2\x01\x91\x00\x32\x00\xF9",
-            "xxx??x?x??x?xxx?xxx"
-        );
-        if (matchVtable)
-        {
-            matchVtable += 3;
-            matchVtable = (PBYTE)ARM64_DecodeADRL((UINT_PTR)matchVtable, *(DWORD*)matchVtable, *(DWORD*)(matchVtable + 4));
-        }
-    }
 #endif
     if (matchVtable)
     {
@@ -2035,33 +2056,68 @@ BOOL FixStartMenuAnimation(HMODULE hTwinuiPcshell, PBYTE pSearchBegin, size_t cb
         g_SMAnimationPatchOffsets.startExperienceManager_closingAnimation = g_SMAnimationPatchOffsets.startExperienceManager_openingAnimation + 32;
     }
 #elif defined(_M_ARM64)
-    // ```
-    // 08 07 80 52 ?? ?? ?? 39 ?? ?? ?? B9
-    //             ^^^^^^^^^^^ AH1
-    // ```
+    // * 28000.2630~, 29634~
+    //   ```
+    //   P: 1F 00 00 39 08 07 80 52 08 00 00 B9
+    //   M: 1F 00 C0 FF FF FF FF FF 1F 00 C0 FF
+    //      ^^^^^^^^^^^ AH1
+    //   STRB WZR [X20, #???]
+    //     P: 0b0011100100_000000000000_00000_11111 = 3900001F = 1F 00 00 39
+    //     M: 0b1111111111_000000000000_00000_11111 = FFC0001F = 1F 00 C0 FF
+    //   STR W8 [X??, #???]
+    //     P: 0b1011100100_000000000000_00000_01000 = B9000008 = 08 00 00 B9
+    //     M: 0b1111111111_000000000000_00000_11111 = FFC0001F = 1F 00 C0 FF
+    //   ```
     // Ref: CStartExperienceManager::CStartExperienceManager()
     // AH2 is located right after AH1. AH is 32 bytes
+    int openingAnimation = -1;
     if (matchSingleViewShellExperienceFields)
     {
-        matchAnimationHelperFields = (PBYTE)FindPattern_4_(
+        matchAnimationHelperFields = (PBYTE)FindPatternBitMask_4_(
             matchSingleViewShellExperienceFields + 20,
             128,
-            "\x08\x07\x80\x52\x00\x00\x00\x39\x00\x00\x00\xB9",
-            "xxxx???x???x"
+            "\x1F\x00\x00\x39\x08\x07\x80\x52\x08\x00\x00\xB9",
+            "\x1F\x00\xC0\xFF\xFF\xFF\xFF\xFF\x1F\x00\xC0\xFF",
+            12
         );
     }
     if (matchAnimationHelperFields)
     {
-        int openingAnimation = (int)ARM64_DecodeSTRBIMM(*(DWORD*)(matchAnimationHelperFields + 4));
-        if (openingAnimation != -1)
+        openingAnimation = (int)ARM64_DecodeSTRBIMM(*(DWORD*)(matchAnimationHelperFields + 0));
+    }
+    else
+    {
+        // * 22000, 22621, 25398, 26100, 28000
+        //   ```
+        //   P: 08 07 80 52 1F 00 00 39 08 00 00 B9
+        //   M: FF FF FF FF 1F 00 C0 FF 1F 00 C0 FF
+        //                  ^^^^^^^^^^^ AH1
+        //   ```
+        //   Ref: CStartExperienceManager::CStartExperienceManager()
+        //   AH2 is located right after AH1. AH is 32 bytes
+        if (matchSingleViewShellExperienceFields)
         {
-            g_SMAnimationPatchOffsets.startExperienceManager_openingAnimation = openingAnimation;
-            g_SMAnimationPatchOffsets.startExperienceManager_closingAnimation = g_SMAnimationPatchOffsets.startExperienceManager_openingAnimation + 32;
+            matchAnimationHelperFields = (PBYTE)FindPatternBitMask_4_(
+                matchSingleViewShellExperienceFields + 20,
+                128,
+                "\x08\x07\x80\x52\x1F\x00\x00\x39\x08\x00\x00\xB9",
+                "\xFF\xFF\xFF\xFF\x1F\x00\xC0\xFF\x1F\x00\xC0\xFF",
+                12
+            );
         }
-        else
+        if (matchAnimationHelperFields)
         {
-            matchAnimationHelperFields = nullptr;
+            openingAnimation = (int)ARM64_DecodeSTRBIMM(*(DWORD*)(matchAnimationHelperFields + 4));
         }
+    }
+    if (openingAnimation != -1)
+    {
+        g_SMAnimationPatchOffsets.startExperienceManager_openingAnimation = openingAnimation;
+        g_SMAnimationPatchOffsets.startExperienceManager_closingAnimation = g_SMAnimationPatchOffsets.startExperienceManager_openingAnimation + 32;
+    }
+    else
+    {
+        matchAnimationHelperFields = nullptr;
     }
 #endif
     if (matchAnimationHelperFields)
@@ -2160,80 +2216,51 @@ BOOL FixStartMenuAnimation(HMODULE hTwinuiPcshell, PBYTE pSearchBegin, size_t cb
         matchGetMonitorInformation += 5 + *(int*)(matchGetMonitorInformation + 1);
     }
 #elif defined(_M_ARM64)
-    // * Pattern for 22000 and 226xx, CSingleViewShellExperience* first arg *not* passed (E1 03 14 AA)
-    //   ```
-    //   ?? ?? ?? A9 E4 ?? ?? ?? E3 ?? ?? 91 E2 ?? ?? 91 E0 03 ?? AA ?? ?? ?? ?? ?? 03 00 2A
-    //                                                               ^^^^^^^^^^^
-    //   ```
-    // Ref: CStartExperienceManager::PositionMenu()
-    PBYTE matchGetMonitorInformation = (PBYTE)FindPattern_4_(
-        pSearchBegin + 3,
-        cbSearch - 3,
-        "\xA9\xE4\x00\x00\x00\xE3\x00\x00\x91\xE2\x00\x00\x91\xE0\x03\x00\xAA\x00\x00\x00\x00\x00\x03\x00\x2A",
-        "xx???x??xx??xxx?x?????xxx"
+    // 03 04 80 52 ?? ?? 00 79 ?? ?? ?? 91 ?? ?? 00 79 01 00 80 D2
+    // Go back 7 instructions (28 bytes) and look for:
+    // P: 00 A0 00 D1 00 00 00 94
+    // M: 1F FC FF FF 00 00 00 FC
+    // SUB X0, X??, #0x28 (where -0x28 is the cast delta to CSingleViewShellExperience)
+    //   P: 0b11010001_00_000000101000_00000_00000 = D100A000 = 00 A0 00 D1
+    //   M: 0b11111111_11_111111111111_00000_11111 = FFFFFC1F = 1F FC FF FF
+    // CStartExperienceManager::Hide()
+    PBYTE matchGetMonitorInformation = nullptr;
+    FIND_PATTERN_WITH_POSTPROCESS_ARM(
+        pSearchBegin,
+        cbSearch,
+        "\x03\x04\x80\x52\x00\x00\x00\x79\x00\x00\x00\x91\x00\x00\x00\x79\x01\x00\x80\xD2",
+        "\xFF\xFF\xFF\xFF\x00\x00\xFF\xFF\x00\x00\x00\xFF\x00\x00\xFF\xFF\xFF\xFF\xFF\xFF",
+        20,
+        [](PBYTE matchCandidate) -> PBYTE
+        {
+            PBYTE leadingToCall = (PBYTE)FindPatternBitMask_4_(
+                matchCandidate - 28,
+                12 /*Max distance*/ + 8 /*Pattern size*/,
+                "\x00\xA0\x00\xD1\x00\x00\x00\x94",
+                "\x1F\xFC\xFF\xFF\x00\x00\x00\xFC",
+                8
+            );
+            return leadingToCall ? (PBYTE)ARM64_FollowBL((DWORD*)(leadingToCall + 4)) : nullptr;
+        },
+        &matchGetMonitorInformation,
     );
-    if (matchGetMonitorInformation)
-    {
-        matchGetMonitorInformation += 17;
-        matchGetMonitorInformation = (PBYTE)ARM64_FollowBL((DWORD*)matchGetMonitorInformation);
-    }
     if (!matchGetMonitorInformation)
     {
-        // * Pattern for 226xx, CSingleViewShellExperience* first arg passed (E1 03 14 AA)
+        // * Pattern for 22000 and 226xx, CSingleViewShellExperience* first arg *not* passed (E1 03 14 AA)
         //   ```
-        //   ?? ?? ?? A9 E4 ?? ?? ?? E3 ?? ?? 91 E2 ?? ?? 91 E1 03 14 AA E0 03 13 AA ?? ?? ?? ?? ?? 03 00 2A
-        //                                                                           ^^^^^^^^^^^
+        //   ?? ?? ?? A9 E4 ?? ?? ?? E3 ?? ?? 91 E2 ?? ?? 91 E0 03 ?? AA ?? ?? ?? ?? ?? 03 00 2A
+        //                                                               ^^^^^^^^^^^
         //   ```
         // Ref: CStartExperienceManager::PositionMenu()
         matchGetMonitorInformation = (PBYTE)FindPattern_4_(
             pSearchBegin + 3,
             cbSearch - 3,
-            "\xA9\xE4\x00\x00\x00\xE3\x00\x00\x91\xE2\x00\x00\x91\xE1\x03\x14\xAA\xE0\x03\x13\xAA\x00\x00\x00\x00\x00\x03\x00\x2A",
-            "xx???x??xx??xxxxxxxxx?????xxx"
+            "\xA9\xE4\x00\x00\x00\xE3\x00\x00\x91\xE2\x00\x00\x91\xE0\x03\x00\xAA\x00\x00\x00\x00\x00\x03\x00\x2A",
+            "xx???x??xx??xxx?x?????xxx"
         );
         if (matchGetMonitorInformation)
         {
-            matchGetMonitorInformation += 21;
-            matchGetMonitorInformation = (PBYTE)ARM64_FollowBL((DWORD*)matchGetMonitorInformation);
-        }
-    }
-    if (!matchGetMonitorInformation)
-    {
-        // * Pattern for 26100.1, 265, 470, 560, 670, 712, 751, 863, 1000, 1150
-        //   ```
-        //   E2 82 00 91 E1 03 13 AA E0 03 14 AA ?? ?? ?? ??
-        //                                       ^^^^^^^^^^^
-        //   ```
-        // Ref: CStartExperienceManager::PositionMenu()
-        matchGetMonitorInformation = (PBYTE)FindPattern(
-            pSearchBegin,
-            cbSearch,
-            "\xE2\x82\x00\x91\xE1\x03\x13\xAA\xE0\x03\x14\xAA",
-            "xxxxxxxxxxxx"
-        );
-        if (matchGetMonitorInformation)
-        {
-            matchGetMonitorInformation += 12;
-            matchGetMonitorInformation = (PBYTE)ARM64_FollowBL((DWORD*)matchGetMonitorInformation);
-        }
-    }
-    if (!matchGetMonitorInformation)
-    {
-        // * Pattern for 26100.961, 1252, 1301, 1330, 1340, 1350, 1591, ...
-        //   ```
-        //   FF 02 00 39 E2 82 00 91 E0 03 13 AA ?? ?? ?? ??
-        //                                       ^^^^^^^^^^^
-        //   ```
-        // Ref: CStartExperienceManager::PositionMenu()
-        matchGetMonitorInformation = (PBYTE)FindPattern(
-            pSearchBegin,
-            cbSearch,
-            "\xFF\x02\x00\x39\xE2\x82\x00\x91\xE0\x03\x13\xAA",
-            "xxxxxxxxxxxx"
-        );
-        if (matchGetMonitorInformation)
-        {
-            matchGetMonitorInformation += 12;
+            matchGetMonitorInformation += 17;
             matchGetMonitorInformation = (PBYTE)ARM64_FollowBL((DWORD*)matchGetMonitorInformation);
         }
     }
@@ -2246,26 +2273,26 @@ BOOL FixStartMenuAnimation(HMODULE hTwinuiPcshell, PBYTE pSearchBegin, size_t cb
 
     // ### Offset of CExperienceManagerAnimationHelper::Begin()
 #if defined(_M_X64)
-    // * Pattern 1, used when all arguments are available:
-    //   ```
-    //   44 8B C7                      E8 ?? ?? ?? ?? 85 C0 79 19
-    //                                    ^^^^^^^^^^^
-    //   ```
-    // * Pattern 2, used when a4, a5, and a6 are optimized out (e.g. 26020, 26058):
+    // * Pattern 1, used when a4, a5, and a6 are optimized out (e.g. 26020, 26058):
     //   ```
     //   44 8B C7 48 8D 8B ?? ?? ?? ?? E8 ?? ?? ?? ?? 85 C0 79 19
+    //                                    ^^^^^^^^^^^
+    //   ```
+    // * Pattern 2, used when all arguments are available:
+    //   ```
+    //   44 8B C7                      E8 ?? ?? ?? ?? 85 C0 79 19
     //                                    ^^^^^^^^^^^
     //   ```
     // Ref: CJumpViewExperienceManager::OnViewUncloaking()
     PBYTE matchAnimationBegin = (PBYTE)FindPattern(
         pSearchBegin,
         cbSearch,
-        "\x44\x8B\xC7\xE8\x00\x00\x00\x00\x85\xC0\x79\x19",
-        "xxxx????xxxx"
+        "\x44\x8B\xC7\x48\x8D\x8B\x00\x00\x00\x00\xE8\x00\x00\x00\x00\x85\xC0\x79\x19",
+        "xxxxxx????x????xxxx"
     );
     if (matchAnimationBegin)
     {
-        matchAnimationBegin += 3;
+        matchAnimationBegin += 10;
         matchAnimationBegin += 5 + *(int*)(matchAnimationBegin + 1);
     }
     else
@@ -2273,50 +2300,50 @@ BOOL FixStartMenuAnimation(HMODULE hTwinuiPcshell, PBYTE pSearchBegin, size_t cb
         matchAnimationBegin = (PBYTE)FindPattern(
             pSearchBegin,
             cbSearch,
-            "\x44\x8B\xC7\x48\x8D\x8B\x00\x00\x00\x00\xE8\x00\x00\x00\x00\x85\xC0\x79\x19",
-            "xxxxxx????x????xxxx"
+            "\x44\x8B\xC7\xE8\x00\x00\x00\x00\x85\xC0\x79\x19",
+            "xxxx????xxxx"
         );
         if (matchAnimationBegin)
         {
-            matchAnimationBegin += 10;
+            matchAnimationBegin += 3;
             matchAnimationBegin += 5 + *(int*)(matchAnimationBegin + 1);
         }
     }
 #elif defined(_M_ARM64)
-    // * Pattern 1, used when all arguments are available:
+    // * Pattern 1, used when a4, a5, and a6 are optimized out (e.g. 26020, 26058):
     //   ```
-    //   04 00 80 D2 03 00 80 D2 60 C2 05 91 ?? ?? ?? ?? E3 03 00 2A
+    //   ?? 02 0B 32 ?? ?? ?? 91 ?? ?? ?? 91 ?? ?? ?? ?? E3 03 00 2A
     //                                       ^^^^^^^^^^^
     //   ```
     // Ref: CJumpViewExperienceManager::OnViewUncloaking()
     PBYTE matchAnimationBegin = (PBYTE)FindPattern_4_(
-        pSearchBegin,
-        cbSearch,
-        "\x04\x00\x80\xD2\x03\x00\x80\xD2\x60\xC2\x05\x91\x00\x00\x00\x00\xE3\x03\x00\x2A",
-        "xxxxxxxxxxxx????xxxx"
+        pSearchBegin + 1,
+        cbSearch - 1,
+        "\x02\x0B\x32\00\x00\x00\x91\x00\x00\x00\x91\x00\x00\x00\x00\xE3\x03\x00\x2A",
+        "xxx???x???x????xxxx"
     );
     if (matchAnimationBegin)
     {
-        matchAnimationBegin += 12;
+        matchAnimationBegin += 11;
         matchAnimationBegin = (PBYTE)ARM64_FollowBL((DWORD*)matchAnimationBegin);
     }
     else
     {
-        // * Pattern 2, used when a4, a5, and a6 are optimized out (e.g. 26020, 26058):
+        // * Pattern 2, used when all arguments are available:
         //   ```
-        //   ?? 02 0B 32 ?? ?? ?? 91 ?? ?? ?? 91 ?? ?? ?? ?? E3 03 00 2A
+        //   04 00 80 D2 03 00 80 D2 60 C2 05 91 ?? ?? ?? ?? E3 03 00 2A
         //                                       ^^^^^^^^^^^
         //   ```
         // Ref: CJumpViewExperienceManager::OnViewUncloaking()
         matchAnimationBegin = (PBYTE)FindPattern_4_(
-            pSearchBegin + 1,
-            cbSearch - 1,
-            "\x02\x0B\x32\00\x00\x00\x91\x00\x00\x00\x91\x00\x00\x00\x00\xE3\x03\x00\x2A",
-            "xxx???x???x????xxxx"
+            pSearchBegin,
+            cbSearch,
+            "\x04\x00\x80\xD2\x03\x00\x80\xD2\x60\xC2\x05\x91\x00\x00\x00\x00\xE3\x03\x00\x2A",
+            "xxxxxxxxxxxx????xxxx"
         );
         if (matchAnimationBegin)
         {
-            matchAnimationBegin += 11;
+            matchAnimationBegin += 12;
             matchAnimationBegin = (PBYTE)ARM64_FollowBL((DWORD*)matchAnimationBegin);
         }
     }
@@ -3011,14 +3038,15 @@ BOOL FixJumpViewPositioning(HMODULE hTwinuiPcshell, PBYTE pSearchBegin, size_t c
         g_JVPositioningPatchOffsets.jumpViewExperienceManager_trayStuckPlace = 0x40 + *(int*)(matchOffsetTrayStuckPlace + 2);
     }
 #elif defined(_M_ARM64)
-    // ?? ?? 41 B9 89 0B 80 52 A8 01 00 34 1F 05 00 71 20 01 00 54 1F 09 00 71 A0 00 00 54 1F 0D 00 71 01 01 00 54 69 0B 80 52
-    // ^^^^^^^^^^^       Important instr. to distinguish from MeetNowExperienceManager::OnViewUncloaking() in GE > !!!!!!!!!!!
+    // 29553+
+    // ?? ?? 41 B9 C8 01 00 34 1F 05 00 71 40 01 00 54 1F 09 00 71 C0 00 00 54 89 0B 80 52
+    // ^^^^^^^^^^^
     // Ref: CJumpViewExperienceManager::OnViewCloaking()
     PBYTE matchOffsetTrayStuckPlace = (PBYTE)FindPattern_4_(
         pSearchBegin + 2,
         cbSearch - 2,
-        "\x41\xB9\x89\x0B\x80\x52\xA8\x01\x00\x34\x1F\x05\x00\x71\x20\x01\x00\x54\x1F\x09\x00\x71\xA0\x00\x00\x54\x1F\x0D\x00\x71\x01\x01\x00\x54\x69\x0B\x80\x52",
-        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        "\x41\xB9\xC8\x01\x00\x34\x1F\x05\x00\x71\x40\x01\x00\x54\x1F\x09\x00\x71\xC0\x00\x00\x54\x89\x0B\x80\x52",
+        "xxxxxxxxxxxxxxxxxxxxxxxxxx"
     );
     if (matchOffsetTrayStuckPlace)
     {
@@ -3034,15 +3062,14 @@ BOOL FixJumpViewPositioning(HMODULE hTwinuiPcshell, PBYTE pSearchBegin, size_t c
     }
     else
     {
-        // 29553+
-        // ?? ?? 41 B9 C8 01 00 34 1F 05 00 71 40 01 00 54 1F 09 00 71 C0 00 00 54 89 0B 80 52
-        // ^^^^^^^^^^^
+        // ?? ?? 41 B9 89 0B 80 52 A8 01 00 34 1F 05 00 71 20 01 00 54 1F 09 00 71 A0 00 00 54 1F 0D 00 71 01 01 00 54 69 0B 80 52
+        // ^^^^^^^^^^^       Important instr. to distinguish from MeetNowExperienceManager::OnViewUncloaking() in GE > !!!!!!!!!!!
         // Ref: CJumpViewExperienceManager::OnViewCloaking()
         matchOffsetTrayStuckPlace = (PBYTE)FindPattern_4_(
             pSearchBegin + 2,
             cbSearch - 2,
-            "\x41\xB9\xC8\x01\x00\x34\x1F\x05\x00\x71\x40\x01\x00\x54\x1F\x09\x00\x71\xC0\x00\x00\x54\x89\x0B\x80\x52",
-            "xxxxxxxxxxxxxxxxxxxxxxxxxx"
+            "\x41\xB9\x89\x0B\x80\x52\xA8\x01\x00\x34\x1F\x05\x00\x71\x20\x01\x00\x54\x1F\x09\x00\x71\xA0\x00\x00\x54\x1F\x0D\x00\x71\x01\x01\x00\x54\x69\x0B\x80\x52",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
         );
         if (matchOffsetTrayStuckPlace)
         {
@@ -3087,9 +3114,9 @@ BOOL FixJumpViewPositioning(HMODULE hTwinuiPcshell, PBYTE pSearchBegin, size_t c
 #elif defined(_M_ARM64)
     if (matchOffsetTrayStuckPlace)
     {
-        // Without Feature_TaskbarJumplistOnHover (48980211)
-        // 01 38 40 F9 07 00 07 91
-        // ----------- ^^^^^^^^^^^
+        // With Feature_TaskbarJumplistOnHover (48980211)
+        // 61 3A 40 F9 22 01 03 32 67 32 07 91
+        // -----------             ^^^^^^^^^^^
         //   ADD             X7, X??, #0x???
         //     P: 10010001_00_000000000000_00000_00111 = 91000007 = 07 00 00 91
         //     M: 11111111_11_000000000000_00000_11111 = FFC0001F = 1F 00 C0 FF
@@ -3097,9 +3124,9 @@ BOOL FixJumpViewPositioning(HMODULE hTwinuiPcshell, PBYTE pSearchBegin, size_t c
         matchOffsetRcWorkArea = (PBYTE)FindPatternBitMask_4_(
             matchOffsetTrayStuckPlace + 38,
             128,
-            "\x01\x38\x40\xF9\x07\x00\x00\x91",
-            "\xFF\xFF\xFF\xFF\x1F\x00\xC0\xFF",
-            8
+            "\x61\x3A\x40\xF9\x22\x01\x03\x32\x07\x00\x00\x91",
+            "\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x1F\x00\xC0\xFF",
+            12
         );
         if (matchOffsetRcWorkArea)
         {
@@ -3115,9 +3142,9 @@ BOOL FixJumpViewPositioning(HMODULE hTwinuiPcshell, PBYTE pSearchBegin, size_t c
         }
         else
         {
-            // With Feature_TaskbarJumplistOnHover (48980211)
-            // 61 3A 40 F9 22 01 03 32 67 32 07 91
-            // -----------             ^^^^^^^^^^^
+            // Without Feature_TaskbarJumplistOnHover (48980211)
+            // 01 38 40 F9 07 00 07 91
+            // ----------- ^^^^^^^^^^^
             //   ADD             X7, X??, #0x???
             //     P: 10010001_00_000000000000_00000_00111 = 91000007 = 07 00 00 91
             //     M: 11111111_11_000000000000_00000_11111 = FFC0001F = 1F 00 C0 FF
@@ -3125,9 +3152,9 @@ BOOL FixJumpViewPositioning(HMODULE hTwinuiPcshell, PBYTE pSearchBegin, size_t c
             matchOffsetRcWorkArea = (PBYTE)FindPatternBitMask_4_(
                 matchOffsetTrayStuckPlace + 38,
                 128,
-                "\x61\x3A\x40\xF9\x22\x01\x03\x32\x07\x00\x00\x91",
-                "\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x1F\x00\xC0\xFF",
-                12
+                "\x01\x38\x40\xF9\x07\x00\x00\x91",
+                "\xFF\xFF\xFF\xFF\x1F\x00\xC0\xFF",
+                8
             );
             if (matchOffsetRcWorkArea)
             {
@@ -3151,20 +3178,25 @@ BOOL FixJumpViewPositioning(HMODULE hTwinuiPcshell, PBYTE pSearchBegin, size_t c
 
     // CJumpViewExperienceManager::EnsureWindowPosition()
 #if defined(_M_X64)
-    // Base Nickel and Germanium
-    // 8D 4E C0 48 8B ?? E8 ?? ?? ?? ?? 8B
-    //                      ^^^^^^^^^^^
-    // Ref: CJumpViewExperienceManager::OnViewPropertiesChanging()
-    PBYTE matchEnsureWindowPosition = (PBYTE)FindPattern(
-        pSearchBegin,
-        cbSearch,
-        "\x8D\x4E\xC0\x48\x8B\x00\xE8\x00\x00\x00\x00\x8B",
-        "xxxxx?x????x"
-    );
-    if (matchEnsureWindowPosition)
+    PBYTE matchEnsureWindowPosition = nullptr;
+    if (!matchEnsureWindowPosition)
     {
-        matchEnsureWindowPosition += 6;
-        matchEnsureWindowPosition += 5 + *(int*)(matchEnsureWindowPosition + 1);
+        // Germanium with Feature_TaskbarJumplistOnHover (48980211)
+        // - 26100.1350, 1591, ...
+        // 48 8B D7 49 8D 4E C0 E8 ?? ?? ?? ?? 8B
+        //                         ^^^^^^^^^^^
+        // Ref: CJumpViewExperienceManager::OnViewPropertiesChanging()
+        matchEnsureWindowPosition = (PBYTE)FindPattern(
+            pSearchBegin,
+            cbSearch,
+            "\x48\x8B\xD7\x49\x8D\x4E\xC0\xE8\x00\x00\x00\x00\x8B",
+            "xxxxxxxx????x"
+        );
+        if (matchEnsureWindowPosition)
+        {
+            matchEnsureWindowPosition += 7;
+            matchEnsureWindowPosition += 5 + *(int*)(matchEnsureWindowPosition + 1);
+        }
     }
     if (!matchEnsureWindowPosition)
     {
@@ -3187,20 +3219,19 @@ BOOL FixJumpViewPositioning(HMODULE hTwinuiPcshell, PBYTE pSearchBegin, size_t c
     }
     if (!matchEnsureWindowPosition)
     {
-        // Germanium with Feature_TaskbarJumplistOnHover (48980211)
-        // - 26100.1350, 1591, ...
-        // 48 8B D7 49 8D 4E C0 E8 ?? ?? ?? ?? 8B
-        //                         ^^^^^^^^^^^
+        // Base Nickel and Germanium
+        // 8D 4E C0 48 8B ?? E8 ?? ?? ?? ?? 8B
+        //                      ^^^^^^^^^^^
         // Ref: CJumpViewExperienceManager::OnViewPropertiesChanging()
-        matchEnsureWindowPosition = (PBYTE)FindPattern(
+        PBYTE matchEnsureWindowPosition = (PBYTE)FindPattern(
             pSearchBegin,
             cbSearch,
-            "\x48\x8B\xD7\x49\x8D\x4E\xC0\xE8\x00\x00\x00\x00\x8B",
-            "xxxxxxxx????x"
+            "\x8D\x4E\xC0\x48\x8B\x00\xE8\x00\x00\x00\x00\x8B",
+            "xxxxx?x????x"
         );
         if (matchEnsureWindowPosition)
         {
-            matchEnsureWindowPosition += 7;
+            matchEnsureWindowPosition += 6;
             matchEnsureWindowPosition += 5 + *(int*)(matchEnsureWindowPosition + 1);
         }
     }
@@ -3284,13 +3315,14 @@ void TryToFindTwinuiPCShellOffsets(DWORD* pOffsets)
         if (!pOffsets[0] || pOffsets[0] == 0xFFFFFFFF)
         {
 #if defined(_M_X64)
-            // 48 8B 49 08 E8 ?? ?? ?? ?? E9 ?? ?? ?? ?? 48 8B 89
+            // 29591+
+            // 48 8B 49 08 E8 ?? ?? ?? ?? 44 8A ?? E9 ?? ?? ?? ?? 48 8B 89
             //                ^^^^^^^^^^^
             // Ref: CMultitaskingViewFrame::v_WndProc()
             PBYTE match = (PBYTE)FindPattern(
                 pSearchBegin, cbSearch,
-                "\x48\x8B\x49\x08\xE8\x00\x00\x00\x00\xE9\x00\x00\x00\x00\x48\x8B\x89",
-                "xxxxx????x????xxx"
+                "\x48\x8B\x49\x08\xE8\x00\x00\x00\x00\x44\x8A\x00\xE9\x00\x00\x00\x00\x48\x8B\x89",
+                "xxxxx????xx?x????xxx"
             );
             if (match)
             {
@@ -3299,13 +3331,13 @@ void TryToFindTwinuiPCShellOffsets(DWORD* pOffsets)
             }
             else
             {
-                // 48 8B 49 08 E8 ?? ?? ?? ?? 44 8A ?? E9 ?? ?? ?? ?? 48 8B 89
+                // 48 8B 49 08 E8 ?? ?? ?? ?? E9 ?? ?? ?? ?? 48 8B 89
                 //                ^^^^^^^^^^^
                 // Ref: CMultitaskingViewFrame::v_WndProc()
                 match = (PBYTE)FindPattern(
                     pSearchBegin, cbSearch,
-                    "\x48\x8B\x49\x08\xE8\x00\x00\x00\x00\x44\x8A\x00\xE9\x00\x00\x00\x00\x48\x8B\x89",
-                    "xxxxx????xx?x????xxx"
+                    "\x48\x8B\x49\x08\xE8\x00\x00\x00\x00\xE9\x00\x00\x00\x00\x48\x8B\x89",
+                    "xxxxx????x????xxx"
                 );
                 if (match)
                 {
@@ -3314,18 +3346,34 @@ void TryToFindTwinuiPCShellOffsets(DWORD* pOffsets)
                 }
             }
 #elif defined(_M_ARM64)
-            // ?? ?? 00 71 ?? ?? 00 54 ?? ?? 40 F9 E3 03 ?? AA E2 03 ?? AA E1 03 ?? 2A ?? ?? ?? ??
+            // 28000.2630, 29634
+            // ?? ?? 00 71 ?? ?? 00 54 E3 03 ?? AA E2 03 ?? AA E1 03 ?? 2A ?? ?? 40 F9 ?? ?? ?? ??
             //                                                                         ^^^^^^^^^^^
-            // Ref: CMultitaskingViewFrame::v_WndProc()
             PBYTE match = (PBYTE)FindPattern_4_(
                 pSearchBegin + 2, cbSearch - 2,
-                "\x00\x71\x00\x00\x00\x54\x00\x00\x40\xF9\xE3\x03\x00\xAA\xE2\x03\x00\xAA\xE1\x03\x00\x2A",
-                "xx??xx??xxxx?xxx?xxx?x"
+                "\x00\x71\x00\x00\x00\x54\xE3\x03\x00\xAA\xE2\x03\x00\xAA\xE1\x03\x00\x2A\x00\x00\x40\xF9",
+                "xx??xxxx?xxx?xxx?x??xx"
             );
             if (match)
             {
                 match += 22;
                 pOffsets[0] = (DWORD)FileOffsetToRVA(pFile, (PBYTE)ARM64_FollowBL((DWORD*)match) - pFile);
+            }
+            else
+            {
+                // ?? ?? 00 71 ?? ?? 00 54 ?? ?? 40 F9 E3 03 ?? AA E2 03 ?? AA E1 03 ?? 2A ?? ?? ?? ??
+                //                                                                         ^^^^^^^^^^^
+                // Ref: CMultitaskingViewFrame::v_WndProc()
+                match = (PBYTE)FindPattern_4_(
+                    pSearchBegin + 2, cbSearch - 2,
+                    "\x00\x71\x00\x00\x00\x54\x00\x00\x40\xF9\xE3\x03\x00\xAA\xE2\x03\x00\xAA\xE1\x03\x00\x2A",
+                    "xx??xx??xxxx?xxx?xxx?x"
+                );
+                if (match)
+                {
+                    match += 22;
+                    pOffsets[0] = (DWORD)FileOffsetToRVA(pFile, (PBYTE)ARM64_FollowBL((DWORD*)match) - pFile);
+                }
             }
 #endif
             if (pOffsets[0] && pOffsets[0] != 0xFFFFFFFF)
@@ -3349,32 +3397,31 @@ void TryToFindTwinuiPCShellOffsets(DWORD* pOffsets)
                 pOffsets[1] = (DWORD)(match - pFile);
             }
 #elif defined(_M_ARM64)
-            // ?? ?? 40 F9 43 03 1C 32 E4 03 ?? AA ?? ?? FF 97
-            //                                     ^^^^^^^^^^^
-            // Ref: ImmersiveContextMenuHelper::ApplyOwnerDrawToMenu()
+            // 27938
+            // E4 03 ?? AA E2 03 ?? AA ?? FF FF 97
+            //                         ^^^^^^^^^^^
             PBYTE match = (PBYTE)FindPattern_4_(
-                pSearchBegin + 2, cbSearch - 2,
-                "\x40\xF9\x43\x03\x1C\x32\xE4\x03\x00\xAA\x00\x00\xFF\x97",
-                "xxxxxxxx?x??xx"
+                pSearchBegin, cbSearch,
+                "\xE4\x03\x00\xAA\xE2\x03\x00\xAA\x00\xFF\xFF\x97",
+                "xx?xxx?x?xxx"
             );
             if (match)
             {
-                match += 10;
+                match += 8;
                 pOffsets[1] = (DWORD)FileOffsetToRVA(pFile, (PBYTE)ARM64_FollowBL((DWORD*)match) - pFile);
             }
             else
             {
-                // 43 03 1C 32 E4 03 ?? AA E2 03 ?? AA ?? ?? FF 97 // 27938
+                // ?? ?? 40 F9 43 03 1C 32 E4 03 ?? AA ?? FF FF 97
                 //                                     ^^^^^^^^^^^
-                // Ref: ImmersiveContextMenuHelper::ApplyOwnerDrawToMenu()
                 match = (PBYTE)FindPattern_4_(
-                    pSearchBegin, cbSearch,
-                    "\x43\x03\x1C\x32\xE4\x03\x00\xAA\xE2\x03\x00\xAA\x00\x00\xFF\x97",
-                    "xxxxxx?xxx?x??xx"
+                    pSearchBegin + 2, cbSearch - 2,
+                    "\x40\xF9\x43\x03\x1C\x32\xE4\x03\x00\xAA\x00\xFF\xFF\x97",
+                    "xxxxxxxx?x?xxx"
                 );
                 if (match)
                 {
-                    match += 12;
+                    match += 10;
                     pOffsets[1] = (DWORD)FileOffsetToRVA(pFile, (PBYTE)ARM64_FollowBL((DWORD*)match) - pFile);
                 }
             }
@@ -3419,40 +3466,41 @@ void TryToFindTwinuiPCShellOffsets(DWORD* pOffsets)
         if (!pOffsets[3] || pOffsets[3] == 0xFFFFFFFF)
         {
 #if defined(_M_X64)
-            // 48 8B ? E8 ? ? ? ? 4C 8B ? 48 8B ? 48 8B CE E8 ? ? ? ? 90
-            //                                                ^^^^^^^
+            // 27938+ (Bromine):
+            // 48 8B ? E8 ? ? ? ? 4C 8D 47 ? 48 8B ? 48 8B CE E8 ? ? ? ? 90
+            //                                                   ^^^^^^^
             PBYTE match = (PBYTE)FindPattern(
                 pSearchBegin, cbSearch,
-                "\x48\x8B\x00\xE8\x00\x00\x00\x00\x4C\x8B\x00\x48\x8B\x00\x48\x8B\xCE\xE8\x00\x00\x00\x00\x90",
-                "xx?x????xx?xx?xxxx????x"
+                "\x48\x8B\x00\xE8\x00\x00\x00\x00\x4C\x8D\x47\x00\x48\x8B\x00\x48\x8B\xCE\xE8\x00\x00\x00\x00\x90",
+                "xx?x????xxx?xx?xxxx????x"
             );
             if (match)
             {
-                match += 17;
+                match += 18;
                 pOffsets[3] = (DWORD)(match + 5 + *(int*)(match + 1) - pFile);
             }
             else
             {
-                // 48 8B ? E8 ? ? ? ? 4C 8D 47 ? 48 8B ? 48 8B CE E8 ? ? ? ? 90
-                //                                                   ^^^^^^^
+                // 48 8B ? E8 ? ? ? ? 4C 8B ? 48 8B ? 48 8B CE E8 ? ? ? ? 90
+                //                                                ^^^^^^^
                 match = (PBYTE)FindPattern(
                     pSearchBegin, cbSearch,
-                    "\x48\x8B\x00\xE8\x00\x00\x00\x00\x4C\x8D\x47\x00\x48\x8B\x00\x48\x8B\xCE\xE8\x00\x00\x00\x00\x90",
-                    "xx?x????xxx?xx?xxxx????x"
+                    "\x48\x8B\x00\xE8\x00\x00\x00\x00\x4C\x8B\x00\x48\x8B\x00\x48\x8B\xCE\xE8\x00\x00\x00\x00\x90",
+                    "xx?x????xx?xx?xxxx????x"
                 );
                 if (match)
                 {
-                    match += 18;
+                    match += 17;
                     pOffsets[3] = (DWORD)(match + 5 + *(int*)(match + 1) - pFile);
                 }
             }
 #elif defined(_M_ARM64)
-            // ?? 0A 40 F9 ?? 02 40 F9 ?? ?? 00 F9 ?? ?? ?? ?? ?? 62 00 91 ?? ?? 00 91 E0 03 ?? AA ?? ?? ?? ?? 1F 20 03 D5
+            // ?? 0A 40 F9 ?? ?? ?? F9 ?? ?? 00 ?? ?? ?? ?? ?? ?? 62 00 91 ?? ?? 00 91 E0 03 ?? AA ?? ?? ?? ?? 1F 20 03 D5
             //                                                                                     ^^^^^^^^^^^
             PBYTE match = (PBYTE)FindPattern_4_(
                 pSearchBegin + 1, cbSearch - 1,
-                "\x0A\x40\xF9\x00\x02\x40\xF9\x00\x00\x00\xF9\x00\x00\x00\x00\x00\x62\x00\x91\x00\x00\x00\x91\xE0\x03\x00\xAA\x00\x00\x00\x00\x1F\x20\x03\xD5",
-                "xxx?xxx??xx?????xxx??xxxx?x????xxxx"
+                "\x0A\x40\xF9\x00\x00\x00\xF9\x00\x00\x00\x00\x00\x00\x00\x00\x00\x62\x00\x91\x00\x00\x00\x91\xE0\x03\x00\xAA\x00\x00\x00\x00\x1F\x20\x03\xD5",
+                "xxx???x??x??????xxx??xxxx?x????xxxx"
             );
             if (match)
             {
@@ -3468,47 +3516,63 @@ void TryToFindTwinuiPCShellOffsets(DWORD* pOffsets)
         if (!pOffsets[4] || pOffsets[4] == 0xFFFFFFFF)
         {
 #if defined(_M_X64)
-            // Cobalt:
-            // 48 89 46 ? 48 8B CB E8 ? ? ? ? 48 8B D3 48 8B CF E8 ? ? ? ? 90
-            //                                                     ^^^^^^^
+            // Nickel+:
+            // 48 89 03 48 8B CB E8 ? ? ? ? 48 8B D3 48 8B CF E8 ? ? ? ? 90
+            //                                                   ^^^^^^^
             PBYTE match = (PBYTE)FindPattern(
                 pSearchBegin, cbSearch,
-                "\x48\x89\x46\x00\x48\x8B\xCB\xE8\x00\x00\x00\x00\x48\x8B\xD3\x48\x8B\xCF\xE8\x00\x00\x00\x00\x90",
-                "xxx?xxxx????xxxxxxx????x"
+                "\x48\x89\x03\x48\x8B\xCB\xE8\x00\x00\x00\x00\x48\x8B\xD3\x48\x8B\xCF\xE8\x00\x00\x00\x00\x90",
+                "xxxxxxx????xxxxxxx????x"
             );
             if (match)
             {
-                match += 18;
+                match += 17;
                 pOffsets[4] = (DWORD)(match + 5 + *(int*)(match + 1) - pFile);
             }
             else
             {
-                // Nickel+:
-                // 48 89 03 48 8B CB E8 ? ? ? ? 48 8B D3 48 8B CF E8 ? ? ? ? 90
-                //                                                   ^^^^^^^
+                // Cobalt:
+                // 48 89 46 ? 48 8B CB E8 ? ? ? ? 48 8B D3 48 8B CF E8 ? ? ? ? 90
+                //                                                     ^^^^^^^
                 match = (PBYTE)FindPattern(
                     pSearchBegin, cbSearch,
-                    "\x48\x89\x03\x48\x8B\xCB\xE8\x00\x00\x00\x00\x48\x8B\xD3\x48\x8B\xCF\xE8\x00\x00\x00\x00\x90",
-                    "xxxxxxx????xxxxxxx????x"
+                    "\x48\x89\x46\x00\x48\x8B\xCB\xE8\x00\x00\x00\x00\x48\x8B\xD3\x48\x8B\xCF\xE8\x00\x00\x00\x00\x90",
+                    "xxx?xxxx????xxxxxxx????x"
                 );
                 if (match)
                 {
-                    match += 17;
+                    match += 18;
                     pOffsets[4] = (DWORD)(match + 5 + *(int*)(match + 1) - pFile);
                 }
             }
 #elif defined(_M_ARM64)
-            // 08 09 40 F9 ?? ?? 00 F9 ?? ?? ?? ?? ?? ?? 00 91 E0 03 ?? AA ?? ?? ?? ?? 1F 20 03 D5
-            //                                                             ^^^^^^^^^^^
+            // 28000.2630, 29634
+            // 08 09 40 F9 ?? ?? 00 F9 ?? ?? 00 91 ?? ?? ?? ?? ?? ?? 00 91 E0 03 ?? AA ?? ?? ?? ?? 1F 20 03 D5
+            //                                                                         ^^^^^^^^^^^
             PBYTE match = (PBYTE)FindPattern_4_(
                 pSearchBegin, cbSearch,
-                "\x08\x09\x40\xF9\x00\x00\x00\xF9\x00\x00\x00\x00\x00\x00\x00\x91\xE0\x03\x00\xAA\x00\x00\x00\x00\x1F\x20\x03\xD5",
-                "xxxx??xx??????xxxx?x????xxxx"
+                "\x08\x09\x40\xF9\x00\x00\x00\xF9\x00\x00\x00\x91\x00\x00\x00\x00\x00\x00\x00\x91\xE0\x03\x00\xAA\x00\x00\x00\x00\x1F\x20\x03\xD5",
+                "xxxx??xx??xx??????xxxx?x????xxxx"
             );
             if (match)
             {
-                match += 20;
+                match += 24;
                 pOffsets[4] = (DWORD)FileOffsetToRVA(pFile, (PBYTE)ARM64_FollowBL((DWORD*)match) - pFile);
+            }
+            else
+            {
+                // 08 09 40 F9 ?? ?? 00 F9 ?? ?? ?? ?? ?? ?? 00 91 E0 03 ?? AA ?? ?? ?? ?? 1F 20 03 D5
+                //                                                             ^^^^^^^^^^^
+                match = (PBYTE)FindPattern_4_(
+                    pSearchBegin, cbSearch,
+                    "\x08\x09\x40\xF9\x00\x00\x00\xF9\x00\x00\x00\x00\x00\x00\x00\x91\xE0\x03\x00\xAA\x00\x00\x00\x00\x1F\x20\x03\xD5",
+                    "xxxx??xx??????xxxx?x????xxxx"
+                );
+                if (match)
+                {
+                    match += 20;
+                    pOffsets[4] = (DWORD)FileOffsetToRVA(pFile, (PBYTE)ARM64_FollowBL((DWORD*)match) - pFile);
+                }
             }
 #endif
             if (pOffsets[4] && pOffsets[4] != 0xFFFFFFFF)
@@ -3535,7 +3599,7 @@ void TryToFindTwinuiPCShellOffsets(DWORD* pOffsets)
             }
             else
             {
-                // Non-inlined GetMTVHostKind()
+                // Non-inlined GetMTVHostKind() (Germanium+)
                 // 8B CF E8 ?? ?? ?? ?? ?? 89 ?? 24 ?? ?? 8B ?? ?? 8B ?? 8B D7 48 8B CE 83 F8 01 <jnz>
                 match = (PBYTE)FindPattern(
                     pSearchBegin, cbSearch,
@@ -3577,48 +3641,62 @@ void TryToFindTwinuiPCShellOffsets(DWORD* pOffsets)
         {
 #if defined(_M_X64)
             // Ref: CMultitaskingViewManager::_CreateMTVHost()
-            // Inlined GetMTVHostKind()
-            // 4C 89 74 24 ?? ?? 8B ?? ?? 8B ?? 8B D7 48 8B CE E8 ?? ?? ?? ?? 90
-            //                                                    ^^^^^^^^^^^
+            // Non-inlined GetMTVHostKind() (Germanium+)
+            // 8B CF E8 ?? ?? ?? ?? ?? 89 ?? 24 ?? ?? 8B ?? ?? 8B ?? 8B D7 48 8B CE 83 F8 01 <jnz>
             PBYTE match = (PBYTE)FindPattern(
                 pSearchBegin, cbSearch,
-                "\x4C\x89\x74\x24\x00\x00\x8B\x00\x00\x8B\x00\x8B\xD7\x48\x8B\xCE\xE8\x00\x00\x00\x00\x90",
-                "xxxx??x??x?xxxxxx????x"
+                "\x8B\xCF\xE8\x00\x00\x00\x00\x00\x89\x00\x24\x00\x00\x8B\x00\x00\x8B\x00\x8B\xD7\x48\x8B\xCE\x83\xF8\x01",
+                "xxx?????x?x??x??x?xxxxxxxx"
             );
             if (match)
             {
-                match += 16;
-                pOffsets[6] = (DWORD)(match + 5 + *(int*)(match + 1) - pFile);
+                PBYTE target = nullptr;
+                DWORD jnzSize = 0;
+                if (FollowJnz(match + 26, &target, &jnzSize) && target[0] == 0xE8)
+                {
+                    pOffsets[6] = (DWORD)(target + 5 + *(int*)(target + 1) - pFile);
+                }
             }
             else
             {
-                // Non-inlined GetMTVHostKind()
-                // 8B CF E8 ?? ?? ?? ?? ?? 89 ?? 24 ?? ?? 8B ?? ?? 8B ?? 8B D7 48 8B CE 83 F8 01 <jnz>
+                // Inlined GetMTVHostKind()
+                // 4C 89 74 24 ?? ?? 8B ?? ?? 8B ?? 8B D7 48 8B CE E8 ?? ?? ?? ?? 90
+                //                                                    ^^^^^^^^^^^
                 match = (PBYTE)FindPattern(
                     pSearchBegin, cbSearch,
-                    "\x8B\xCF\xE8\x00\x00\x00\x00\x00\x89\x00\x24\x00\x00\x8B\x00\x00\x8B\x00\x8B\xD7\x48\x8B\xCE\x83\xF8\x01",
-                    "xxx?????x?x??x??x?xxxxxxxx"
+                    "\x4C\x89\x74\x24\x00\x00\x8B\x00\x00\x8B\x00\x8B\xD7\x48\x8B\xCE\xE8\x00\x00\x00\x00\x90",
+                    "xxxx??x??x?xxxxxx????x"
                 );
                 if (match)
                 {
-                    PBYTE target = nullptr;
-                    DWORD jnzSize = 0;
-                    if (FollowJnz(match + 26, &target, &jnzSize) && target[0] == 0xE8)
-                    {
-                        pOffsets[6] = (DWORD)(target + 5 + *(int*)(target + 1) - pFile);
-                    }
+                    match += 16;
+                    pOffsets[6] = (DWORD)(match + 5 + *(int*)(match + 1) - pFile);
                 }
             }
 #elif defined(_M_ARM64)
-            // F3 53 BC A9  F5 5B 01 A9  F7 13 00 F9  F9 17 00 F9  FB 1B 00 F9  FD 7B BC A9  FD 03 00 91  FF ?? 00 D1  30 00 80 92  ?? 03 04 AA
+            // 28000.2630, 29634
+            // F3 53 BD A9  F5 5B 01 A9  F9 13 00 F9  FB 17 00 F9  FD 7B BC A9  FD 03 00 91  FF ?? 00 D1  30 00 80 92  ?? 03 00 AA  ?? 03 01 2A
             PBYTE match = (PBYTE)FindPattern_4_(
                 pSearchBegin, cbSearch,
-                "\xF3\x53\xBC\xA9\xF5\x5B\x01\xA9\xF7\x13\x00\xF9\xF9\x17\x00\xF9\xFB\x1B\x00\xF9\xFD\x7B\xBC\xA9\xFD\x03\x00\x91\xFF\x00\x00\xD1\x30\x00\x80\x92\x00\x03\x04\xAA",
-                "xxxxxxxxxxxxxxxxxxxxxxxxxxxxx?xxxxxx?xxx"
+                "\xF3\x53\xBD\xA9\xF5\x5B\x01\xA9\xF9\x13\x00\xF9\xFB\x17\x00\xF9\xFD\x7B\xBC\xA9\xFD\x03\x00\x91\xFF\x00\x00\xD1\x30\x00\x80\x92\x00\x03\x00\xAA\x00\x03\x01\x2A",
+                "xxxxxxxxxxxxxxxxxxxxxxxxx?xxxxxx?xxx?xxx"
             );
             if (match)
             {
                 pOffsets[6] = (DWORD)FileOffsetToRVA(pFile, match - 4 - pFile);
+            }
+            else
+            {
+                // F3 53 BC A9  F5 5B 01 A9  F7 13 00 F9  F9 17 00 F9  FB 1B 00 F9  FD 7B BC A9  FD 03 00 91  FF ?? 00 D1  30 00 80 92  ?? 03 04 AA
+                match = (PBYTE)FindPattern_4_(
+                    pSearchBegin, cbSearch,
+                    "\xF3\x53\xBC\xA9\xF5\x5B\x01\xA9\xF7\x13\x00\xF9\xF9\x17\x00\xF9\xFB\x1B\x00\xF9\xFD\x7B\xBC\xA9\xFD\x03\x00\x91\xFF\x00\x00\xD1\x30\x00\x80\x92\x00\x03\x04\xAA",
+                    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxx?xxxxxx?xxx"
+                );
+                if (match)
+                {
+                    pOffsets[6] = (DWORD)FileOffsetToRVA(pFile, match - 4 - pFile);
+                }
             }
 #endif
             if (pOffsets[6] && pOffsets[6] != 0xFFFFFFFF)

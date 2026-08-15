@@ -234,14 +234,14 @@ BOOL PatchContextMenuOfNewMicrosoftIME(BOOL* bFound)
 #elif defined(_M_ARM64)
     DWORD newInsn = 0;
 
-    // A8 43 40 39 C8 04 00 34 E0 03 ?? AA
+    // A8 43 40 39 ?? ?? 00 34 E0 03 ?? AA
     //             ^^^^^^^^^^^ Change CBZ to B
     // Ref: CTsfHandler::_OnOopImeContextMenu()
     PBYTE match = (PBYTE)FindPattern_4_(
         pInputSwitchText,
         cbInputSwitchText,
-        "\xA8\x43\x40\x39\xC8\x04\x00\x34\xE0\x03\x00\xAA",
-        "xxxxxxxxxx?x"
+        "\xA8\x43\x40\x39\x00\x00\x00\x34\xE0\x03\x00\xAA",
+        "xxxx??xxxx?x"
     );
     if (match)
     {
