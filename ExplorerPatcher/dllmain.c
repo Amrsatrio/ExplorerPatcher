@@ -10464,24 +10464,6 @@ HMODULE PrepareAlternateTaskbarImplementation(symbols_addr* symbols_PTRS, BOOL* 
         }
     }
 
-    typedef void (WINAPI *CopyExplorerSymbols_t)(symbols_addr* symbols);
-    CopyExplorerSymbols_t CopyExplorerSymbols = (CopyExplorerSymbols_t)GetProcAddress(hMyTaskbar, "CopyExplorerSymbols");
-    if (CopyExplorerSymbols)
-    {
-        CopyExplorerSymbols(symbols_PTRS);
-    }
-
-    typedef void (WINAPI *SetImmersiveMenuFunctions_t)(void* a, void* b, void* c);
-    SetImmersiveMenuFunctions_t SetImmersiveMenuFunctions = (SetImmersiveMenuFunctions_t)GetProcAddress(hMyTaskbar, "SetImmersiveMenuFunctions");
-    if (SetImmersiveMenuFunctions)
-    {
-        SetImmersiveMenuFunctions(
-            CImmersiveContextMenuOwnerDrawHelper_s_ContextMenuWndProcFunc,
-            ImmersiveContextMenuHelper_ApplyOwnerDrawToMenuFunc,
-            ImmersiveContextMenuHelper_RemoveOwnerDrawFromMenuFunc
-        );
-    }
-
     wprintf(L"[TB] Using '%s'\n", pszTaskbarDll);
     return hMyTaskbar;
 }
@@ -11201,6 +11183,24 @@ DWORD Inject(BOOL bIsExplorer)
 
     if (hMyTaskbar)
     {
+        typedef void (WINAPI *CopyExplorerSymbols_t)(symbols_addr* symbols);
+        CopyExplorerSymbols_t CopyExplorerSymbols = (CopyExplorerSymbols_t)GetProcAddress(hMyTaskbar, "CopyExplorerSymbols");
+        if (CopyExplorerSymbols)
+        {
+            CopyExplorerSymbols(&symbols_PTRS);
+        }
+
+        typedef void (WINAPI *SetImmersiveMenuFunctions_t)(void* a, void* b, void* c);
+        SetImmersiveMenuFunctions_t SetImmersiveMenuFunctions = (SetImmersiveMenuFunctions_t)GetProcAddress(hMyTaskbar, "SetImmersiveMenuFunctions");
+        if (SetImmersiveMenuFunctions)
+        {
+            SetImmersiveMenuFunctions(
+                CImmersiveContextMenuOwnerDrawHelper_s_ContextMenuWndProcFunc,
+                ImmersiveContextMenuHelper_ApplyOwnerDrawToMenuFunc,
+                ImmersiveContextMenuHelper_RemoveOwnerDrawFromMenuFunc
+            );
+        }
+
         VnPatchIAT(hMyTaskbar, "user32.dll", "DeleteMenu", explorer_DeleteMenu);
         VnPatchIAT(hMyTaskbar, "user32.dll", "LoadMenuW", explorer_LoadMenuW);
         VnPatchIAT(hMyTaskbar, "user32.dll", "SendMessageW", explorer_SendMessageW);
