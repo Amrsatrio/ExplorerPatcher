@@ -9223,41 +9223,45 @@ static void PatchAddressBarSizing(PBYTE pSearchBegin, size_t cbSearch)
             }
         }
 
-        // CAddressBand::_GetAdjustedClientRect(), including 29591+ without a post-call NOP.
-        // 83 43 04 ?? 83 43 0C ?? 48 83 C4 20 5B C3
-        //          xx To 03    xx To FF (-1)
+        // CAddressBand::_AddressBandWndProc() WM_PAINT: RECT for DrawThemeBackground().
+        // 26100.9343+, 28000.3142+: inlined with XORPS between the RECT adjustments.
+        // Search this first: these builds also keep the standalone helper for _PositionChildWindows().
+        // 83 45 ?? ?? 0F 57 C0 83 6D ?? ??
+        //          xx To 03          xx To 01
         match = FindPattern(
             pSearchBegin,
             cbSearch,
-            "\x83\x43\x04\x00\x83\x43\x0C\x00\x48\x83\xC4\x20\x5B\xC3",
-            "xxx?xxx?xxxxxx"
+            "\x83\x45\x00\x00\x0F\x57\xC0\x83\x6D\x00\x00\x0F\x11\x45\x00",
+            "xx??xxxxx??xxx?"
         );
         if (match)
         {
-            if (VirtualProtect(match, 8, PAGE_EXECUTE_READWRITE, &dwOldProtect))
+            if (VirtualProtect(match, 11, PAGE_EXECUTE_READWRITE, &dwOldProtect))
             {
                 match[3] = 3;
-                match[7] = (BYTE)-1;
-                VirtualProtect(match, 8, dwOldProtect, &dwOldProtect);
+                match[10] = 1;
+                VirtualProtect(match, 11, dwOldProtect, &dwOldProtect);
             }
         }
         else
         {
-            // 26100.9606+: inlined calculation with XORPS between the RECT adjustments.
-            // Ref: CAddressBand::_AddressBandWndProc()
+            // _AddressBandWndProc() calls the standalone CAddressBand::_GetAdjustedClientRect(),
+            // including 29591+ without a post-call NOP.
+            // 83 43 04 ?? 83 43 0C ?? 48 83 C4 20 5B C3
+            //          xx To 03    xx To FF (-1)
             match = FindPattern(
                 pSearchBegin,
                 cbSearch,
-                "\x83\x45\x00\x00\x0F\x57\xC0\x83\x6D\x00\x00\x0F\x11\x45\x00",
-                "xx??xxxxx??xxx?"
+                "\x83\x43\x04\x00\x83\x43\x0C\x00\x48\x83\xC4\x20\x5B\xC3",
+                "xxx?xxx?xxxxxx"
             );
             if (match)
             {
-                if (VirtualProtect(match, 11, PAGE_EXECUTE_READWRITE, &dwOldProtect))
+                if (VirtualProtect(match, 8, PAGE_EXECUTE_READWRITE, &dwOldProtect))
                 {
                     match[3] = 3;
-                    match[10] = 1;
-                    VirtualProtect(match, 11, dwOldProtect, &dwOldProtect);
+                    match[7] = (BYTE)-1;
+                    VirtualProtect(match, 8, dwOldProtect, &dwOldProtect);
                 }
             }
             else
